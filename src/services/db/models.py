@@ -1,11 +1,12 @@
 # coding: utf-8
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, text
-from sqlalchemy.orm import declarative_base, relationship
-#from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, text
+from sqlalchemy.orm import relationship
+from sqlalchemy.ext.declarative import declarative_base
 
 from .database import Base, Session, engine
 
 metadata = Base.metadata
+
 
 class Address(Base):
     __tablename__ = 'addresses'
@@ -59,6 +60,7 @@ class User(Base):
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
+    levels = Column(SmallInteger, nullable=False, server_default=text("0"))
 
 
 class InkindDonationRequirement(Base):
