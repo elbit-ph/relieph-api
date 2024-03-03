@@ -1,11 +1,13 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
+from fastapi import APIRouter, Depends, UploadFile
 
-from dependencies import get_db_session, get_logger, get_s3_handler
+from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user
 from services.db.database import Session
 from services.db.models import User
 from services.log.log_handler import LoggingService
 from services.aws.s3_handler import S3_Handler
+from models.auth_details import AuthDetails
+from util.auth.auth_tool import authorize
 
 router = APIRouter(
     prefix="/test",
@@ -39,3 +41,16 @@ async def get_user_img(id:int, s3handler: S3Handler):
     if resu[1] != True:
         return {'Error':'Invalid'}
     return {'link':resu[0]}
+
+@router.get('/current-user')
+async def get_current_user(user: User = Depends(get_current_user)):
+    return user
+
+@router.get('/test-level-1')
+async def get_level_1(user: AuthDetails = Depends(get_current_user)):
+    authorize(user=user, min_level=0, max_level=1) # checks if user has the right role
+    return user
+
+@router.get('/{id}')
+async def get_user(id:int, user_auth: AuthDetails = Depends(get_current_user)):
+    authorize(user_auth, min_level=1)
