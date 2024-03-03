@@ -60,7 +60,7 @@ class User(Base):
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
-    levels = Column(SmallInteger, nullable=False, server_default=text("0"))
+    level = Column(SmallInteger, nullable=False, server_default=text("0"))
 
 
 class InkindDonationRequirement(Base):
