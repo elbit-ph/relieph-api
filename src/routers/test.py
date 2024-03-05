@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, UploadFile, HTTPException, status
 
 from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user
 from services.db.database import Session
@@ -18,6 +18,34 @@ router = APIRouter(
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
 S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
+
+@router.get("/get-user/{id}")
+def get_user(id:int, db:DB):
+    user:User = db.query(User).filter(User.id == id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found."
+        )
+    return {
+        "firstname" : user.first_name,
+        "lastname" : user.last_name
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 @router.get("/")
 async def get_test(logger: Logger, s3handler: S3Handler):
