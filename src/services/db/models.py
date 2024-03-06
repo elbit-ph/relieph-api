@@ -1,7 +1,8 @@
 # coding: utf-8
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Table, Text, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
+
 from .database import Base, Session, engine
 
 metadata = Base.metadata
@@ -56,9 +57,9 @@ class User(Base):
     mobile = Column(String(255), server_default=text("NULL::character varying"))
     profile_dir = Column(String(255), server_default=text("NULL::character varying"))
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
+    level = Column(SmallInteger, nullable=False, server_default=text("0"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
-    level = Column(SmallInteger, nullable=False, server_default=text("0"))
 
 
 class InkindDonationRequirement(Base):
@@ -170,6 +171,16 @@ class UsedMoney(Base):
     updated_at = Column(DateTime(True))
 
     relief = relationship('ReliefEffort')
+
+
+t_verification_codes = Table(
+    'verification_codes', metadata,
+    Column('user_id', ForeignKey('users.id'), nullable=False),
+    Column('code', String(50), nullable=False),
+    Column('reason', String(50), nullable=False),
+    Column('created_at', DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    Column('expired_at', DateTime(True), nullable=False)
+)
 
 
 class VolunteerRequirement(Base):
