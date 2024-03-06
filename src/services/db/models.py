@@ -2,11 +2,9 @@
 from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
-
 from .database import Base, Session, engine
 
 metadata = Base.metadata
-
 
 class Address(Base):
     __tablename__ = 'addresses'
