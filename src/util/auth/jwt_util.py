@@ -16,7 +16,8 @@ JWT_SECRET_KEY = os.environ['JWT_SECRET_KEY']   # should be kept secret
 JWT_REFRESH_SECRET_KEY = os.environ['JWT_REFRESH_SECRET_KEY']    # should be kept secret
 
 def get_hashed_password(password: str) -> str:
-    return bcrypt.hashpw(password)
+    password = password.encode('utf-8')
+    return bcrypt.hashpw(password, bcrypt.gensalt()).decode('utf-8')
 
 def verify_password(password: str, hashed_pass: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), bytes(hashed_pass, 'UTF-8'))
