@@ -5,6 +5,8 @@ from sqlalchemy.ext.declarative import declarative_base
 
 from .database import Base, Session, engine
 
+from datetime import datetime
+
 metadata = Base.metadata
 
 class Address(Base):
@@ -173,19 +175,26 @@ class UsedMoney(Base):
     relief = relationship('ReliefEffort')
 
 
-t_verification_codes = Table(
-    'verification_codes', metadata,
-    Column('user_id', ForeignKey('users.id'), nullable=False),
-    Column('code', String(50), nullable=False),
-    Column('reason', String(50), nullable=False),
-    Column('created_at', DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
-    Column('expired_at', DateTime(True), nullable=False)
-)
+# t_verification_codes = Table(
+#     'verification_codes', metadata,
+#     Column('user_id', ForeignKey('users.id'), nullable=False),
+#     Column('code', String(50), nullable=False),
+#     Column('reason', String(50), nullable=False),
+#     Column('created_at', DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+#     Column('expired_at', DateTime(True), nullable=False)
+# )
 
+class VerificationCode(Base):
+    __tablename__ = 'verification_codes'
+    id = Column(Integer, primary_key=True, server_default=text("nextval('verification_codes_id_seq'::regclass)"))
+    user_id = Column(ForeignKey('users.id'), nullable=False)
+    code = Column(String(50), nullable=False)
+    reason = Column(String(50), nullable=False)
+    created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    expired_at = Column(DateTime(True), nullable=False)
 
 class VolunteerRequirement(Base):
     __tablename__ = 'volunteer_requirements'
-
     id = Column(Integer, primary_key=True, server_default=text("nextval('volunteer_requirements_id_seq'::regclass)"))
     relief_id = Column(ForeignKey('relief_efforts.id'), nullable=False)
     name = Column(String(150), nullable=False)
