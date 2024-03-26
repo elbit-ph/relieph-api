@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from dotenv import load_dotenv
-from routers import test, auth
+from routers import test, auth, users
 
 load_dotenv()
 
@@ -13,6 +13,7 @@ cache_opts = {
 api_app = FastAPI(title="info api")
 api_app.include_router(test.router)
 api_app.include_router(auth.router)
+api_app.include_router(users.router)
 
 app = FastAPI(title="main app")
 app.mount("/api", api_app)
