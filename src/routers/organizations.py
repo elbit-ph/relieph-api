@@ -155,12 +155,14 @@ async def saveOrganizationProfile(id: int, image: UploadFile, res: Response, db:
         return {"detail": "Forbidden action."}
 
     # check if file already exists
-    img = s3.get_image(id, 'users')
-    if (img is None):
+    img = s3.get_image(id, 'organizations')
+    if img is not None:
         # delete currently saved
-
-        # temporarily return
-        return
+        await s3.delete_image(id, 'organizations')
+        await s3.upload_single_image(image, id, 'organizations')
+        return {
+            "detail": "Profile successfully updated."
+        }
 
     await s3.upload_single_image(image, id, 'organizations')
 

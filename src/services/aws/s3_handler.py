@@ -49,7 +49,7 @@ class S3_Handler():
 
         return (presigned_url, True)
 
-    # downloads user profile
+    # downloads profile profile
     def download_single_image(self, id:int, from_:str):
         if from_ not in self.allowed_directories:
             return ('InvalidDirectory', False)
@@ -79,3 +79,22 @@ class S3_Handler():
     # to follow:
     #       multiple image uploads
     #       multiple image access
+
+    async def delete_image(self, id:int, from_:str):
+        if from_ not in self.allowed_directories:
+            return ('InvalidDirectory', False)
+        to_delete = ""
+        
+        for obj in self.s3_bucket.objects.filter(Prefix=f'{from_}/'):
+            print(obj.key.split('/')[-1].split('.')[0])
+            if (obj.key.split('/')[-1].split('.')[0] == str(id)):
+                print(obj.key)
+                to_delete = obj.key
+                break
+
+        if to_delete == "":
+            return ('NonExistentImage', False)
+
+        self.s3.delete_object(Bucket=self.bucket_name, Key=to_delete)
+        
+        return ('Success', True)

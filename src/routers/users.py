@@ -150,7 +150,15 @@ class NewAddressDTO(BaseModel):
     coordinates: str
 
 @router.post("/{id}/address")
-async def saveUserAddress(db:DB, id: int, addressDto: NewAddressDTO):
+async def saveUserAddress(db:DB, id: int, addressDto: NewAddressDTO, user: AuthDetails = Depends(get_current_user)):
+    authorize(user, 2,5)
+
+    if id != user.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Unauthorized action."
+        )
+
     newAddress = Address()
     
     newAddress.owner_id = id
@@ -171,14 +179,19 @@ async def saveUserAddress(db:DB, id: int, addressDto: NewAddressDTO):
 @router.post("/profile")
 async def saveUserProfile(image: UploadFile, db:DB, s3:S3Handler, user: AuthDetails = Depends(get_current_user)):
     # get user id from authentication
+    authorize(2,5)
 
     # check if file already exists
-    img = s3.get_image(id, 'users')
-    if (img is None):
-        # delete currently saved
+    img = s3.get_image(user.user_id, 'users')
 
-        # temporarily return
-        return
+    if (img is not None):
+        # delete currently saved
+        await s3.delete_image(user.user_id, 'users')
+        # save new profile
+        await s3.upload_single_image(image, user.user_id, 'users')
+        return {
+            "detail": "Profile successfully updated."
+        }
 
     await s3.upload_single_image(image, user.user_id, 'users')
 
