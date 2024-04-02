@@ -1,11 +1,9 @@
 # coding: utf-8
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Table, Text, text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 
 from .database import Base, Session, engine
-
-from datetime import datetime
 
 metadata = Base.metadata
 
@@ -35,8 +33,6 @@ class ReliefEffort(Base):
     disaster_type = Column(String(80), nullable=False)
     name = Column(String(100), nullable=False)
     description = Column(String(255), nullable=False)
-    purpose = Column(Text)
-    gallery_dir = Column(String(255))
     monetary_goal = Column(Numeric, server_default=text("0.00"))
     phase = Column(String(50), nullable=False, server_default=text("'Preparing'::character varying"))
     is_active = Column(Boolean, server_default=text("false"))
@@ -45,6 +41,8 @@ class ReliefEffort(Base):
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
+    account_number = Column(String(100))
+    money_platform = Column(String(200))
 
 
 class User(Base):
@@ -57,7 +55,6 @@ class User(Base):
     password = Column(String(255), server_default=text("NULL::character varying"))
     email = Column(String(255), server_default=text("NULL::character varying"))
     mobile = Column(String(255), server_default=text("NULL::character varying"))
-    profile_dir = Column(String(255), server_default=text("NULL::character varying"))
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     level = Column(SmallInteger, nullable=False, server_default=text("0"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
@@ -88,7 +85,6 @@ class Organization(Base):
     tier = Column(Integer, nullable=False)
     name = Column(String(100), nullable=False)
     description = Column(String(255), nullable=False)
-    media_dir = Column(String(255), server_default=text("NULL::character varying"))
     is_active = Column(Boolean, server_default=text("false"))
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
@@ -175,17 +171,9 @@ class UsedMoney(Base):
     relief = relationship('ReliefEffort')
 
 
-# t_verification_codes = Table(
-#     'verification_codes', metadata,
-#     Column('user_id', ForeignKey('users.id'), nullable=False),
-#     Column('code', String(50), nullable=False),
-#     Column('reason', String(50), nullable=False),
-#     Column('created_at', DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
-#     Column('expired_at', DateTime(True), nullable=False)
-# )
-
 class VerificationCode(Base):
     __tablename__ = 'verification_codes'
+
     id = Column(Integer, primary_key=True, server_default=text("nextval('verification_codes_id_seq'::regclass)"))
     user_id = Column(ForeignKey('users.id'), nullable=False)
     code = Column(String(50), nullable=False)
@@ -193,8 +181,12 @@ class VerificationCode(Base):
     created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     expired_at = Column(DateTime(True), nullable=False)
 
+    user = relationship('User')
+
+
 class VolunteerRequirement(Base):
     __tablename__ = 'volunteer_requirements'
+
     id = Column(Integer, primary_key=True, server_default=text("nextval('volunteer_requirements_id_seq'::regclass)"))
     relief_id = Column(ForeignKey('relief_efforts.id'), nullable=False)
     name = Column(String(150), nullable=False)
