@@ -1,5 +1,5 @@
-from typing import Annotated
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body
+from typing import Annotated, List
+from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
 from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user
 from services.db.database import Session
 from services.db.models import User, Address
@@ -10,8 +10,12 @@ from util.auth.auth_tool import authorize
 from util.auth.jwt_util import (
     get_hashed_password
 )
-from pydantic import BaseModel
+from util.files.image_validator import is_image_valid
+from pydantic import BaseModel, Json
 from datetime import datetime
+from sqlalchemy import and_
+import json
+from types import SimpleNamespace
 
 router = APIRouter(
     prefix="/users",
@@ -22,6 +26,14 @@ router = APIRouter(
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
 S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
+
+class NewAddressDTO(BaseModel):
+    region: str
+    city: str
+    brgy: str
+    street: str
+    zipcode: int
+    coordinates: str
 
 @router.get("/")
 def retrieveUsers(db: DB, p: int = 1, c: int = 10):
@@ -66,6 +78,8 @@ class UpgadeUserDTO(BaseModel):
     confirmPassword: str
     mobile: str
 
+    address:NewAddressDTO
+
 @router.post("/anonymous/{email}")
 def UpgradeUser(db:DB, email:str, res: Response, body: UpgadeUserDTO):
     user:User = db.query(User).filter(User.email == email).first()
@@ -98,9 +112,13 @@ class BasicUserDTO(BaseModel):
     confirmPassword: str
     email: str
     mobile: str
+    # address input
+    address:NewAddressDTO
 
 @router.post("/basic")
-def createBasicUser(db:DB, res: Response, body:BasicUserDTO):
+async def createBasicUser(db:DB, res: Response, profile: UploadFile, s3:S3Handler, body:Json = Form()):
+    body:BasicUserDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
+
     # check if email is already used  
     if db.query(User).filter(User.email == body.email).first() != None:
         res.status_code = 400
@@ -121,6 +139,13 @@ def createBasicUser(db:DB, res: Response, body:BasicUserDTO):
         return {
             "detail": "Mismatched passwords"
         }
+    
+    # check if image is valid
+    if is_image_valid(profile) == False:
+        res.status_code = 400
+        return {
+            "detail" : "Invalid profile image format."
+        }
 
     user = User()
 
@@ -137,49 +162,69 @@ def createBasicUser(db:DB, res: Response, body:BasicUserDTO):
     db.add(user)
     db.commit()
 
-    # also return id    
-    return {
-        "detail" : "Account successfully created"
-    }
-
-class NewAddressDTO(BaseModel):
-    region: str
-    city: str
-    brgy: str
-    zipcode: str
-    coordinates: str
-
-@router.post("/{id}/address")
-async def saveUserAddress(db:DB, id: int, addressDto: NewAddressDTO, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 2,5)
-
-    if id != user.user_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Unauthorized action."
-        )
-
     newAddress = Address()
     
-    newAddress.owner_id = id
+    newAddress.owner_id = user.id
     newAddress.owner_type = "USER"
-    newAddress.region = addressDto.region
-    newAddress.city = addressDto.city
-    newAddress.brgy = addressDto.brgy
-    newAddress.zipcode = addressDto.zipcode
-    newAddress.coordinates = addressDto.coordinates
+    newAddress.region = body.address.region
+    newAddress.city = body.address.city
+    newAddress.brgy = body.address.brgy
+    newAddress.street = body.address.street
+    newAddress.zipcode = body.address.zipcode
+    newAddress.coordinates = body.address.coordinates
 
     db.add(newAddress)
     db.commit()
 
+    resu = await s3.upload_single_image(profile, user.id, 'users')
+
+    if resu[1] == False:
+        print(f'Profile of user {id} not added correctly.')
+
+    # also return id    
     return {
-        "detail": "success"
+        "detail" : "Account successfully created."
+    }
+
+@router.patch("/address")
+async def editUserAddress(db:DB, res: Response, body: NewAddressDTO, user: AuthDetails = Depends(get_current_user)):#
+    authorize(user, 2,5)
+
+    relief_address:Address = db.query(Address).filter(and_(Address.owner_type == 'USER', Address.owner_id == user.user_id)).first()
+
+    null_at_first = False
+
+    if relief_address is None:
+        relief_address = Address()
+        relief_address.owner_id = user.user_id
+        relief_address.owner_type = 'USER'
+        null_at_first = True
+
+    relief_address.region = relief_address.region if body.region is "" else body.region
+    relief_address.city = relief_address.city if body.city is "" else body.city
+    relief_address.brgy = relief_address.brgy if body.brgy is "" else body.brgy
+    relief_address.street = relief_address.street if body.street is "" else body.street
+    relief_address.zipcode = relief_address.zipcode if body.zipcode is "" else body.zipcode
+    relief_address.coordinates = relief_address.coordinates if body.coordinates is "" else body.coordinates
+    relief_address.updated_at = datetime.now()
+
+    if null_at_first:
+        db.add(relief_address)
+
+    db.commit()
+
+    return {
+        "detail": "Relief address successfully edited."
     }
 
 @router.post("/profile")
-async def saveUserProfile(image: UploadFile, db:DB, s3:S3Handler, user: AuthDetails = Depends(get_current_user)):
+async def saveUserProfile(image: UploadFile, res:Response, db:DB, s3:S3Handler, user: AuthDetails = Depends(get_current_user)):
     # get user id from authentication
     authorize(2,5)
+
+    if is_image_valid(image) == False:
+        res.status_code = 400
+        return {"detail" : "Invalid image format."}
 
     # check if file already exists
     img = s3.get_image(user.user_id, 'users')
@@ -203,10 +248,10 @@ async def saveUserProfile(image: UploadFile, db:DB, s3:S3Handler, user: AuthDeta
 @router.get("/{id}/profile")
 def retrieveUserProfile(id:int, res: Response, s3: S3Handler):
     resu = s3.get_image(id, 'users')
-
+    
     if resu[1] != True:
         res.status_code = 400
-        return {'Error':'Invalid'}
+        return {'Error':'User profile retrieval failed.'}
      
     return {
         'link': resu[0]
@@ -224,16 +269,18 @@ async def changeLevel(db:DB, id:int, to:int, user: AuthDetails = Depends(get_cur
     user.level = to
 
     return {
-        "detail": "success"
+        "detail": "Successfully changed level of user."
     }
 
 @router.delete("/{id}")
 async def deleteUser(db:DB, id:int, res: Response, user:AuthDetails = Depends(get_current_user)):
+    authorize(user, 1,5)
+    
     # check first if current user is similar to user
-    if (id != user.user_id):
+    if id != user.user_id and user.level != 5:
         res.status_code = 403
         return {
-            "detail": "Forbidden access"
+            "detail": "Insufficient authorization to delete user."
         }
 
     user:User = db.query(User).filter(User.id == user.user_id).first()
@@ -242,5 +289,5 @@ async def deleteUser(db:DB, id:int, res: Response, user:AuthDetails = Depends(ge
     db.commit()
 
     return {
-        "detail" : "success"
+        "detail" : "Successfully deleted user."
     }
