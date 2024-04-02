@@ -1,10 +1,11 @@
 from typing import Annotated, List
 from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user
+from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_organization_email_handler
 from services.db.database import Session
 from services.db.models import Organization, User, Address
 from services.log.log_handler import LoggingService
 from services.aws.s3_handler import S3_Handler
+from services.email.organization_email_handler import OrganizationEmailHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
 from pydantic import BaseModel, Json
@@ -22,6 +23,7 @@ router = APIRouter(
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
 S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
+OrganizationEmailer = Annotated[OrganizationEmailHandler, Depends(get_organization_email_handler)]
 
 class OrganizationAddressDTO(BaseModel):
     region:str
@@ -53,7 +55,7 @@ class CreateOrganizationDTO(BaseModel):
     address: OrganizationAddressDTO
 
 @router.post("/")
-async def createOrganization(db:DB, res:Response, s3:S3Handler, profile: UploadFile, body: Json = Form(), user: AuthDetails = Depends(get_current_user)):
+async def createOrganization(db:DB, res:Response, s3:S3Handler, profile: UploadFile, organization_email_handler:OrganizationEmailer, body: Json = Form(), user: AuthDetails = Depends(get_current_user)):
     # check for authorization
     authorize(user,2,5)
 
@@ -95,6 +97,10 @@ async def createOrganization(db:DB, res:Response, s3:S3Handler, profile: UploadF
 
     if resu[1] == False:
         print(f'Profile of organization {id} not added correctly.')
+
+    user:User = db.query(User).filter(User.id == user.user_id).first()
+
+    await organization_email_handler.send_organization_creation_notice(user.email, user.first_name, org.name, org.tier)
 
     return {"details": "Organization created."}
 
@@ -174,7 +180,7 @@ def retrieveOrganizationProfile(id:int, res: Response, s3: S3Handler):
     }
 
 @router.post("/{id}/tier/{to}")
-def changeTier(id:int, to:int, res:Response, db:DB, user: AuthDetails = Depends(get_current_user)):
+async def changeTier(id:int, to:int, res:Response, db:DB, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
     authorize(user, 5, 5)
 
     org:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False)).first()
@@ -187,13 +193,17 @@ def changeTier(id:int, to:int, res:Response, db:DB, user: AuthDetails = Depends(
 
     db.commit()
 
+    user:User = db.query(User).filter(User.id == user.user_id).first()
+
+    email_resu = await organization_email_handler.send_organization_tier_notice(user.email, user.first_name, org.name, to)
+
     return {"detail":"Tier successfully changed"}
 
 # to follow once foundation endpoints are created
 # [POST] applyForSponsorship() - used to apply for foundation sponsorship
 
 @router.delete("/{id}")
-def deleteOrganization(id:int, db:DB, res: Response, user: AuthDetails = Depends(get_current_user)):
+async def deleteOrganization(id:int, db:DB, res: Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
     authorize(user, 2, 5)
 
     org:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False)).first()
@@ -209,5 +219,9 @@ def deleteOrganization(id:int, db:DB, res: Response, user: AuthDetails = Depends
     org.is_deleted = True
 
     db.commit()
+
+    user:User = db.query(User).filter(User.id == user.user_id).first()
+
+    await organization_email_handler.send_deletion_notice(user.email, user.first_name, org.name)
 
     return {"detail": "Organization deleted"}
