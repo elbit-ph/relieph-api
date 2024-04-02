@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from fastapi import UploadFile
 from PIL import Image
+from typing import List
 
 load_dotenv()
 
@@ -37,7 +38,6 @@ class S3_Handler():
         
         # return presigned url
         presigned_url = ""
-
         try:
             response = self.s3.generate_presigned_url('get_object',
                                                  Params={'Bucket':os.environ.get('S3_BUCKET_NAME'),
@@ -48,17 +48,55 @@ class S3_Handler():
             return ('ErrorPresigning', False)
 
         return (presigned_url, True)
-
-    # downloads profile profile
-    def download_single_image(self, id:int, from_:str):
-        if from_ not in self.allowed_directories:
-            return ('InvalidDirectory', False)
+    
+    async def upload_multiple(self, images: List[UploadFile], id:int, to:str):
+        # if to not in self.allowed_directories:
+        #     return ('InvalidDirectory', False)
+        to_upload = []
         try:
-            # images before storage are parsed into png format
-            self.s3.download_file(self.bucket_name, f'{from_}/{id}.png', f'{id}.png')
-        except:
-            return ('NonExistentImage', False)
-        return ('Returned', True)
+            count = 1
+            for image in images:
+                suffix = image.filename.split('.')[-1]
+                if suffix not in self.allowed_img_suffix:
+                    # if not valid image file, return error
+                    return ('InvalidImage', False)
+                # process and add image to list of to_upload
+                image.filename = f'{count}.{suffix}'
+                count += 1
+                to_upload.append(image)
+            
+            for image in to_upload:
+                self.s3.upload_fileobj(image.file, self.bucket_name, f'{to}/{image.filename}')
+        
+        except Exception as e:
+            return ('UploadError', False)
+        return ('Success', True)
+    
+    async def retrieve_multiple(self, id:int, from_:str):
+        # validate `from_` if valid source
+        
+        # iteratively return all links of images in folder
+        to_return = []
+        for obj in self.s3_bucket.objects.filter(Prefix=f'{from_}/'):
+            #print(obj.key)
+            to_return.append(obj.key)
+    
+        if len(to_return) == 0:
+            return ("ImagesNonExistent", False)
+            
+        image_urls = []
+        for key in to_return:
+            try:
+                response = self.s3.generate_presigned_url('get_object',
+                                                 Params={'Bucket':os.environ.get('S3_BUCKET_NAME'),
+                                                         'Key' : key},
+                                                 ExpiresIn=3600)
+                # check if response is valid?
+                image_urls.append(response)
+            except:
+                return ('ErrorPresigning', False)
+
+        return (image_urls, True)
     
     # uploads user profile
     async def upload_single_image(self, file: UploadFile, id:int, to:str):
@@ -75,10 +113,6 @@ class S3_Handler():
         except:
             return ('FailedUpload',False)
         return ('Success', True)
-
-    # to follow:
-    #       multiple image uploads
-    #       multiple image access
 
     async def delete_image(self, id:int, from_:str):
         if from_ not in self.allowed_directories:
