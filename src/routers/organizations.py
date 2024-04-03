@@ -2,7 +2,7 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
 from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_organization_email_handler
 from services.db.database import Session
-from services.db.models import Organization, User, Address
+from services.db.models import Organization, User, Address, SponsorshipRequest
 from services.log.log_handler import LoggingService
 from services.aws.s3_handler import S3_Handler
 from services.email.organization_email_handler import OrganizationEmailHandler
@@ -100,7 +100,7 @@ async def createOrganization(db:DB, res:Response, s3:S3Handler, profile: UploadF
 
     user:User = db.query(User).filter(User.id == user.user_id).first()
 
-    await organization_email_handler.send_organization_creation_notice(user.email, user.first_name, org.name, org.tier)
+    await organization_email_handler.send_organization_creation_notice(user.email, user.first_name, org.name)
 
     return {"details": "Organization created."}
 
@@ -225,3 +225,45 @@ async def deleteOrganization(id:int, db:DB, res: Response, organization_email_ha
     await organization_email_handler.send_deletion_notice(user.email, user.first_name, org.name)
 
     return {"detail": "Organization deleted"}
+
+class SponsorshipRequestDTO(BaseModel):
+    message: str
+    organization_id: int
+    foundation_id: int
+
+@router.post("/sponsor")
+def apply_for_sponsorship(body: SponsorshipRequestDTO, db:DB, res: Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
+    authorize(user,1,5)
+
+    org:Organization = db.query(Organization).filter(and_(Organization.id == body.organization_id, Organization.is_deleted == False)).first()
+    foundation:Organization = db.query(Organization).filter(and_(Organization.id == body.foundation_id, Organization.is_deleted == False, Organization.tier == 4)).first()
+
+    if org is None:
+        res.status_code = 400
+        return {'detail' : 'Organization not found.'}
+    
+    if foundation is None:
+        res.status_code = 400
+        return {'detail' : 'Foundation not found.'}
+    
+    if org.owner_id != user.user_id:
+        res.status_code = 403
+        return {'detail' : 'Insufficient authorization to request for sponsorship.'}
+    
+    req:SponsorshipRequest = db.query(SponsorshipRequest).filter(and_(SponsorshipRequest.organization_id == body.organization_id, SponsorshipRequest.foundation_id == body.foundation_id, SponsorshipRequest.is_deleted == False)).first()
+
+    if req is not None:
+        res.status_code = 400
+        return {'detail' : 'Request already exists'}
+    
+    req = SponsorshipRequest()
+    
+    req.organization_id = body.organization_id
+    req.foundation_id = body.foundation_id
+    req.message = body.message
+    req.status = 'PENDING'
+
+    db.add(req)
+    db.commit()
+    
+    return {'detail' : 'Successfully sent sponsorship application request.'}

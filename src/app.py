@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from dotenv import load_dotenv
-from routers import test, auth, users, organizations, relief
+from routers import test, auth, users, organizations, relief, foundations
 
 load_dotenv()
 
@@ -16,6 +16,7 @@ api_app.include_router(auth.router)
 api_app.include_router(users.router)
 api_app.include_router(organizations.router)
 api_app.include_router(relief.router)
+api_app.include_router(foundations.router)
 
 app = FastAPI(title="main app")
 app.mount("/api", api_app)
