@@ -188,6 +188,7 @@ async def createReliefEffortAsOrganization(db:DB, s3_handler:S3Handler, res: Res
 
     org: Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False, Organization.is_active == True)).first()
 
+
     if org is None:
         res.status_code = 404
         return {"detail": "Organization not found."}
@@ -287,7 +288,7 @@ async def createReliefEffortAsOrganization(db:DB, s3_handler:S3Handler, res: Res
 
 @router.patch("/approve/{id}")
 async def approveReliefEffort(db:DB, id:int, res: Response, relief_email_handler: ReliefEmail, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 5, 5)
+    authorize(user, 2, 5)
 
     # TO FOLLOW: allow foundations to approve relief efforts so long
     # as organization is sponsored/supported by said foundation
@@ -298,22 +299,29 @@ async def approveReliefEffort(db:DB, id:int, res: Response, relief_email_handler
         res.status_code = 404
         return {"detail": "Relief effort non-existent."}
     
-    user:User = None
+    usr:User = None
 
     if relief.owner_type == 'ORGANIZATION':
+        org:Organization = db.query(Organization).filter(and_(Organization.id == relief.owner_id)).first()
+        foundation:Organization = db.query(Organization).filter(and_(Organization.id == org.sponsor_id)).first()
+
+        if user.level != 5 and (foundation is None or user.user_id != foundation.owner_id):
+            res.status_code = 403
+            return {'detail' : 'Not authorized'}
         # get user affliated
-        user = db.query(User).join(Organization).filter(and_(Organization.owner_id == User.id, Organization.id == relief.owner_id)).first()
+        usr = db.query(User).join(Organization).filter(and_(Organization.owner_id == User.id, Organization.id == relief.owner_id)).first()
     else:
         # get user straight
-        user = db.query(User).filter(User.id == relief.owner_id).first()
+        usr = db.query(User).filter(User.id == relief.owner_id).first()
 
-    email = user.email
-    name = user.first_name
+    email = usr.email
+    name = usr.first_name
 
     # send email about this
     await relief_email_handler.send_approval(email, name, relief.name)
     
     relief.is_active = True
+    relief.phase = 'PREPARING'
     relief.updated_at = datetime.now()
 
     db.commit()
@@ -335,20 +343,27 @@ async def rejectReliefEffort(db:DB, id:int, res: Response, relief_email_handler:
     
     relief.is_deleted = True
     relief.is_active = False
-    relief.phase = 'Rejected'
+    relief.phase = 'REJECTED'
     relief.updated_at = datetime.now()
 
-    user:User = None
+    usr:User = None
 
     if relief.owner_type == 'ORGANIZATION':
         # get user affliated
-        user = db.query(User).join(Organization).filter(and_(Organization.owner_id == User.id, Organization.id == relief.owner_id)).first()
+        org:Organization = db.query(Organization).filter(and_(Organization.id == relief.owner_id)).first()
+        foundation:Organization = db.query(Organization).filter(and_(Organization.id == org.sponsor_id)).first()
+
+        if user.level != 5 and (foundation is None or user.user_id != foundation.owner_id):
+            res.status_code = 403
+            return {'detail' : 'Not authorized'}
+        
+        usr = db.query(User).join(Organization).filter(and_(Organization.owner_id == User.id, Organization.id == relief.owner_id)).first()
     else:
         # get user straight
-        user = db.query(User).filter(User.id == relief.owner_id).first()
+        usr = db.query(User).filter(User.id == relief.owner_id).first()
 
-    email = user.email
-    name = user.first_name
+    email = usr.email
+    name = usr.first_name
 
     # send email about this
     await relief_email_handler.send_rejection(email, name, relief.name)
