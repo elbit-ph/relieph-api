@@ -35,6 +35,13 @@ S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
 Email_Handler = Annotated[EmailHandler, Depends(get_email_handler)]
 Cache_Handler = Annotated[CacheHandler, Depends(get_cache_handler)]
 
+# user levels
+# 0/None - Guest/Anonymous
+# 1 - Personal Accounts
+# 2 - Personal+ accounts (verified)
+# 3 - Organization Holder
+# 4 - Admin/Moderator
+
 @router.post('/login', summary="Create access and refresh tokens for user")
 async def login(db:DB, form_data: OAuth2PasswordRequestForm = Depends()):
     user:User = db.query(User).filter(User.username==form_data.username).first()
