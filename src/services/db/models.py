@@ -5,6 +5,7 @@ from sqlalchemy.ext.declarative import declarative_base
 
 from .database import Base, Session, engine
 
+Base = declarative_base()
 metadata = Base.metadata
 
 class Address(Base):
@@ -44,6 +45,7 @@ class ReliefEffort(Base):
     account_number = Column(String(100))
     money_platform = Column(String(200))
 
+
 class User(Base):
     __tablename__ = 'users'
 
@@ -58,6 +60,7 @@ class User(Base):
     level = Column(SmallInteger, nullable=False, server_default=text("0"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
+    sponsor_id = Column(Integer)
 
 
 class InkindDonationRequirement(Base):
@@ -168,6 +171,24 @@ class UsedMoney(Base):
     updated_at = Column(DateTime(True))
 
     relief = relationship('ReliefEffort')
+
+
+class UserUpgadeRequest(Base):
+    __tablename__ = 'user_upgade_requests'
+
+    id = Column(Integer, primary_key=True, server_default=text("nextval('user_upgade_requests_id_seq'::regclass)"))
+    user_id = Column(ForeignKey('users.id'), nullable=False)
+    first_name = Column(String(255), nullable=False)
+    last_name = Column(String(255), nullable=False)
+    sex = Column(String(50), nullable=False)
+    birthday = Column(Date, nullable=False)
+    accountno = Column(String(60), nullable=False)
+    id_type = Column(String(100), nullable=False)
+    status = Column(String(50), nullable=False, server_default=text("'PENDING'::character varying"))
+    created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    expired_at = Column(DateTime(True), nullable=False)
+
+    user = relationship('User')
 
 
 class VerificationCode(Base):
