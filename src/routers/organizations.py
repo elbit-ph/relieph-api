@@ -25,6 +25,11 @@ Logger = Annotated[LoggingService, Depends(get_logger)]
 S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
 OrganizationEmailer = Annotated[OrganizationEmailHandler, Depends(get_organization_email_handler)]
 
+# Organization levels
+# 0 - unapproved
+# 1 - approved
+# 2 - foundations
+
 class OrganizationAddressDTO(BaseModel):
     region:str
     city:str
@@ -34,11 +39,26 @@ class OrganizationAddressDTO(BaseModel):
     coordinates:str
 
 @router.get("/")
-def retrieveOrganizations(db: DB, p: int = 1, c: int = 10):
-    return db.query(Organization).limit(c).offset((p-1)*c).all()
+def retrieveOrganizations(db: DB, s3:S3Handler, p: int = 1, c: int = 10):
+    # also return images
+    orgs:List[Organization] = db.query(Organization).filter(and_(Organization.is_active == True)).limit(c).offset((p-1)*c).all()
+    to_return = []
+    for org in orgs:
+        profile_link = s3.get_image(org.id, 'organizations')
+        to_return.append({
+            "id" : org.id,
+            "owner_id" : org.owner_id,
+            "name" : org.name,
+            "description" : org.description,
+            "tier" : org.tier,
+            "created_at" : org.created_at,
+            "profile_link" : profile_link[0] if profile_link[1] != False else None
+        })
+
+    return to_return
 
 @router.get("/{id}")
-def retrieveOrganization(db:DB, id:int):
+def retrieveOrganization(db:DB, id:int, res: Response, s3:S3Handler):
     org:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False)).first()
 
     if org is None:
@@ -46,18 +66,27 @@ def retrieveOrganization(db:DB, id:int):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found."
         )
-    return org
+    
+    resu = s3.get_image(id, 'organizations')
+
+    if resu[1] != True:
+        print('No image found') # 
+        resu[0] = 'default_link'
+
+    return {
+        'details': org,
+        'profile' : resu[0]
+    }
 
 class CreateOrganizationDTO(BaseModel):
     name:str
     description:str
-    tier: int
     address: OrganizationAddressDTO
 
 @router.post("/")
 async def createOrganization(db:DB, res:Response, s3:S3Handler, profile: UploadFile, organization_email_handler:OrganizationEmailer, body: Json = Form(), user: AuthDetails = Depends(get_current_user)):
     # check for authorization
-    authorize(user,2,5)
+    authorize(user,2,4)
 
     body:CreateOrganizationDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
 
@@ -73,7 +102,7 @@ async def createOrganization(db:DB, res:Response, s3:S3Handler, profile: UploadF
     org.name = body.name
     org.description = body.description
     org.owner_id = user.user_id
-    org.tier = body.tier
+    org.tier = 0
 
     db.add(org)
     db.commit()
@@ -179,28 +208,42 @@ def retrieveOrganizationProfile(id:int, res: Response, s3: S3Handler):
         'link': resu[0]
     }
 
-@router.post("/{id}/tier/{to}")
-async def changeTier(id:int, to:int, res:Response, db:DB, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 5, 5)
+@router.get("/applications")
+def retrieve_organization_applications(res:Response, db:DB, organization_email_handler:OrganizationEmailer, p: int = 1, c: int = 10, user: AuthDetails = Depends(get_current_user)):
+    authorize(user, 4, 4)
+    return db.query(Organization.tier).filter(and_(Organization.tier == 0, Organization.is_deleted == False)).limit(c).offset((p-1)*c).all()
 
-    org:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False)).first()
+@router.patch("/{org_id}/{action}")
+async def resolve_organization_application(org_id:int, action:str, res:Response, db:DB, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
+    authorize(user, 4, 4) # only admins can access this
 
+    org:Organization = db.query(Organization).filter(and_(Organization.id == org_id, Organization.is_deleted == False, Organization.is_active == False)).first()
+    
     if org is None:
         res.status_code = 404
-        return {"detail": "Organization not found."}
-
-    org.tier = to
+        return {'detail': 'Organization not found'}
+    
+    owner:User = db.query(User).filter(User.id == org.owner_id).first()
+    
+    match action.lower():
+        case 'approve':
+            org.tier = 1
+            org.is_active = True
+            if owner.level < 3:
+                owner.level = 3 # signifies an organization owner
+        case 'reject':
+            org.is_deleted = True
+        case _:
+            res.status_code = 400
+            return {'detail' : 'Invalid action'}
+    
+    org.updated_at = datetime.now()
 
     db.commit()
 
-    user:User = db.query(User).filter(User.id == user.user_id).first()
+    # send email notification later
 
-    email_resu = await organization_email_handler.send_organization_tier_notice(user.email, user.first_name, org.name, to)
-
-    return {"detail":"Tier successfully changed"}
-
-# to follow once foundation endpoints are created
-# [POST] applyForSponsorship() - used to apply for foundation sponsorship
+    return {'detail' : f'Successfully resolved organization with status: {action}'}
 
 @router.delete("/{id}")
 async def deleteOrganization(id:int, db:DB, res: Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
