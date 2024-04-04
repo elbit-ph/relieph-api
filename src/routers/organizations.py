@@ -247,7 +247,7 @@ async def resolve_organization_application(org_id:int, action:str, res:Response,
 
 @router.delete("/{id}")
 async def deleteOrganization(id:int, db:DB, res: Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 2, 5)
+    authorize(user, 3, 4)
 
     org:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False)).first()
     
@@ -276,7 +276,7 @@ class SponsorshipRequestDTO(BaseModel):
 
 @router.post("/sponsor")
 def apply_for_sponsorship(body: SponsorshipRequestDTO, db:DB, res: Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
-    authorize(user,1,5)
+    authorize(user,2,2)
 
     org:Organization = db.query(Organization).filter(and_(Organization.id == body.organization_id, Organization.is_deleted == False)).first()
     foundation:Organization = db.query(Organization).filter(and_(Organization.id == body.foundation_id, Organization.is_deleted == False, Organization.tier == 4)).first()
