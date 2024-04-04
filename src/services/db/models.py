@@ -173,10 +173,10 @@ class UsedMoney(Base):
     relief = relationship('ReliefEffort')
 
 
-class UserUpgadeRequest(Base):
-    __tablename__ = 'user_upgade_requests'
+class UserUpgradeRequest(Base):
+    __tablename__ = 'user_upgrade_requests'
 
-    id = Column(Integer, primary_key=True, server_default=text("nextval('user_upgade_requests_id_seq'::regclass)"))
+    id = Column(Integer, primary_key=True, server_default=text("nextval('user_upgrade_requests_id_seq'::regclass)"))
     user_id = Column(ForeignKey('users.id'), nullable=False)
     first_name = Column(String(255), nullable=False)
     last_name = Column(String(255), nullable=False)
@@ -186,7 +186,7 @@ class UserUpgadeRequest(Base):
     id_type = Column(String(100), nullable=False)
     status = Column(String(50), nullable=False, server_default=text("'PENDING'::character varying"))
     created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
-    expired_at = Column(DateTime(True), nullable=False)
+    updated_at = Column(DateTime(True))
 
     user = relationship('User')
 
