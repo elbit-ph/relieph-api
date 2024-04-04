@@ -1,15 +1,18 @@
-from typing import Annotated
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user
+from typing import Annotated, List
+from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
+from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_organization_email_handler
 from services.db.database import Session
-from services.db.models import Organization, User, Address
+from services.db.models import Organization, User, Address, SponsorshipRequest
 from services.log.log_handler import LoggingService
 from services.aws.s3_handler import S3_Handler
+from services.email.organization_email_handler import OrganizationEmailHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
-from pydantic import BaseModel
+from pydantic import BaseModel, Json
 from datetime import datetime
 from sqlalchemy import and_
+import json
+from types import SimpleNamespace
 
 router = APIRouter(
     prefix="/organizations",
@@ -20,6 +23,15 @@ router = APIRouter(
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
 S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
+OrganizationEmailer = Annotated[OrganizationEmailHandler, Depends(get_organization_email_handler)]
+
+class OrganizationAddressDTO(BaseModel):
+    region:str
+    city:str
+    brgy:str
+    street:str
+    zipcode:str
+    coordinates:str
 
 @router.get("/")
 def retrieveOrganizations(db: DB, p: int = 1, c: int = 10):
@@ -40,11 +52,14 @@ class CreateOrganizationDTO(BaseModel):
     name:str
     description:str
     tier: int
+    address: OrganizationAddressDTO
 
 @router.post("/")
-def createOrganization(body: CreateOrganizationDTO, db:DB, res:Response, user: AuthDetails = Depends(get_current_user)):
+async def createOrganization(db:DB, res:Response, s3:S3Handler, profile: UploadFile, organization_email_handler:OrganizationEmailer, body: Json = Form(), user: AuthDetails = Depends(get_current_user)):
     # check for authorization
     authorize(user,2,5)
+
+    body:CreateOrganizationDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
 
     # check if name already exists
     org:Organization = db.query(Organization).filter(Organization.name == body.name).first()
@@ -64,49 +79,30 @@ def createOrganization(body: CreateOrganizationDTO, db:DB, res:Response, user: A
     db.commit()
 
     #IDEA: return org id
-    org = db.query(Organization).filter(Organization.name == body.name).first()
-
-    return {"details": "Organization created.",
-            "org_id" : org.id}
-
-class OrganizationAddressDTO(BaseModel):
-    region:str
-    city:str
-    brgy:str
-    street:str
-    zipcode:str
-    coordinates:str
-
-@router.post("/{id}/address")
-def addOrganizationAddress(id: int, body:OrganizationAddressDTO, db:DB, res:Response, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 2,5)
-
-    # catch if organization exists
-    org:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False)).first()
-
-    if org is None:
-        res.status_code = 404
-        return {"detail": "Organization non-existent"}
-
-    if org.owner_id != user.user_id:
-        res.status_code = 403
-        return {"detail": "Forbidden access"}
-
-    address = Address()
-
-    address.owner_id = user.user_id
-    address.owner_type = 'ORGANIZATION'
-    address.region = body.region
-    address.city = body.city
-    address.brgy = body.brgy
-    address.street = body.street
-    address.zipcode = body.zipcode
-    address.coordinates = body.coordinates
-
-    db.add(address)
-    db.commit()
+    newAddress = Address()
     
-    return {"detail" : "Address added"}
+    newAddress.owner_id = org.id
+    newAddress.owner_type = "ORGANIZATION"
+    newAddress.region = body.address.region
+    newAddress.city = body.address.city
+    newAddress.brgy = body.address.brgy
+    newAddress.street = body.address.street
+    newAddress.zipcode = body.address.zipcode
+    newAddress.coordinates = body.address.coordinates
+
+    db.add(newAddress)
+    db.commit()
+
+    resu = await s3.upload_single_image(profile, org.id, 'organizations')
+
+    if resu[1] == False:
+        print(f'Profile of organization {id} not added correctly.')
+
+    user:User = db.query(User).filter(User.id == user.user_id).first()
+
+    await organization_email_handler.send_organization_creation_notice(user.email, user.first_name, org.name)
+
+    return {"details": "Organization created."}
 
 @router.patch("/{id}/address")
 def editOrganizationAddress(id:int, body:OrganizationAddressDTO, db:DB, res:Response, user: AuthDetails = Depends(get_current_user)):
@@ -130,6 +126,7 @@ def editOrganizationAddress(id:int, body:OrganizationAddressDTO, db:DB, res:Resp
 
     address.region = address.region if body.region is "" else body.region
     address.city = address.city if body.city is "" else body.city
+    address.brgy = address.brgy if body.brgy is "" else body.brgy
     address.street = address.street if body.street is "" else body.street
     address.zipcode = address.zipcode if body.zipcode is "" else body.zipcode
     address.coordinates = address.coordinates if body.coordinates is "" else body.coordinates
@@ -183,18 +180,22 @@ def retrieveOrganizationProfile(id:int, res: Response, s3: S3Handler):
     }
 
 @router.post("/{id}/tier/{to}")
-def changeTier(id:int, to:int, res:Response, db:DB, user: AuthDetails = Depends(get_current_user)):
+async def changeTier(id:int, to:int, res:Response, db:DB, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
     authorize(user, 5, 5)
 
     org:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False)).first()
 
     if org is None:
         res.status_code = 404
-        return {"details": "Organization not found."}
+        return {"detail": "Organization not found."}
 
     org.tier = to
 
     db.commit()
+
+    user:User = db.query(User).filter(User.id == user.user_id).first()
+
+    email_resu = await organization_email_handler.send_organization_tier_notice(user.email, user.first_name, org.name, to)
 
     return {"detail":"Tier successfully changed"}
 
@@ -202,14 +203,14 @@ def changeTier(id:int, to:int, res:Response, db:DB, user: AuthDetails = Depends(
 # [POST] applyForSponsorship() - used to apply for foundation sponsorship
 
 @router.delete("/{id}")
-def deleteOrganization(id:int, db:DB, res: Response, user: AuthDetails = Depends(get_current_user)):
+async def deleteOrganization(id:int, db:DB, res: Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
     authorize(user, 2, 5)
 
     org:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False)).first()
     
     if org is None:
         res.status_code = 404
-        return {"details": "Organization not found."}
+        return {"detail": "Organization not found."}
     
     if org.owner_id is not user.user_id and user.level < 5:
         res.status_code = 403
@@ -219,4 +220,50 @@ def deleteOrganization(id:int, db:DB, res: Response, user: AuthDetails = Depends
 
     db.commit()
 
+    user:User = db.query(User).filter(User.id == user.user_id).first()
+
+    await organization_email_handler.send_deletion_notice(user.email, user.first_name, org.name)
+
     return {"detail": "Organization deleted"}
+
+class SponsorshipRequestDTO(BaseModel):
+    message: str
+    organization_id: int
+    foundation_id: int
+
+@router.post("/sponsor")
+def apply_for_sponsorship(body: SponsorshipRequestDTO, db:DB, res: Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
+    authorize(user,1,5)
+
+    org:Organization = db.query(Organization).filter(and_(Organization.id == body.organization_id, Organization.is_deleted == False)).first()
+    foundation:Organization = db.query(Organization).filter(and_(Organization.id == body.foundation_id, Organization.is_deleted == False, Organization.tier == 4)).first()
+
+    if org is None:
+        res.status_code = 400
+        return {'detail' : 'Organization not found.'}
+    
+    if foundation is None:
+        res.status_code = 400
+        return {'detail' : 'Foundation not found.'}
+    
+    if org.owner_id != user.user_id:
+        res.status_code = 403
+        return {'detail' : 'Insufficient authorization to request for sponsorship.'}
+    
+    req:SponsorshipRequest = db.query(SponsorshipRequest).filter(and_(SponsorshipRequest.organization_id == body.organization_id, SponsorshipRequest.foundation_id == body.foundation_id, SponsorshipRequest.is_deleted == False)).first()
+
+    if req is not None:
+        res.status_code = 400
+        return {'detail' : 'Request already exists'}
+    
+    req = SponsorshipRequest()
+    
+    req.organization_id = body.organization_id
+    req.foundation_id = body.foundation_id
+    req.message = body.message
+    req.status = 'PENDING'
+
+    db.add(req)
+    db.commit()
+    
+    return {'detail' : 'Successfully sent sponsorship application request.'}
