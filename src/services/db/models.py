@@ -44,7 +44,6 @@ class ReliefEffort(Base):
     account_number = Column(String(100))
     money_platform = Column(String(200))
 
-
 class User(Base):
     __tablename__ = 'users'
 
