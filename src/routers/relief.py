@@ -12,7 +12,7 @@ from util.auth.auth_tool import authorize
 from util.files.image_validator import is_image_valid
 from pydantic import BaseModel, ValidationError
 from datetime import datetime, date
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from typing import List
 from pydantic import Json
 import json
@@ -29,9 +29,68 @@ Logger = Annotated[LoggingService, Depends(get_logger)]
 S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
 ReliefEmail = Annotated[ReliefEmailHandler, Depends(get_relief_email_handler)]
 
+
+class ReliefEffortRetrievalDTO(BaseModel):
+    keyword: str = ""
+    category: str = "all"
+    location: str = ""
+    needs: List[str] = ['Monetary', 'Inkind', 'Volunteer Work']
+
+valid_needs = ['Monetary', 'Inkind', 'Volunteer Work']
+
 @router.get("/")
-def retrieveReliefEfforts(db: DB, p: int = 1, c: int = 10):
-    return db.query(ReliefEffort).limit(c).offset((p-1)*c).all()
+def retrieveReliefEfforts(db: DB, body:ReliefEffortRetrievalDTO, p: int = 1, c: int = 10):
+    to_return = []
+    
+    detail_query = and_(ReliefEffort.is_active == True, ReliefEffort.disaster_type.contains(body.category), ReliefEffort.name.contains(body.keyword))
+    
+    address_query = None
+
+    splitted_loc = body.location.split(', ')
+
+    if len(splitted_loc) == 2:
+        address_query = and_(Address.owner_id == ReliefEffort.id, Address.city == splitted_loc[0], Address.region == splitted_loc[1])
+    else:
+        address_query = and_(Address.owner_id == ReliefEffort.id)
+    
+    inkind_query = and_(InkindDonationRequirement.relief_id == ReliefEffort.id, InkindDonationRequirement.is_deleted == False)
+
+    vol_query = and_(VolunteerRequirement.relief_id == ReliefEffort.id, VolunteerRequirement.is_deleted == False)
+
+    if len(body.needs) < 3 or body.needs != valid_needs.sort():
+        # some needs
+        for i in range(0, len(body.needs)):
+            body.needs[i] = body.needs[i].lower()
+
+        match len(body.needs):
+            case 1:
+                match body.needs[0]:
+                    case 'monetary':
+                        to_return = db.query(ReliefEffort, Address).filter(or_(ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
+                    case 'inkind':
+                        to_return = db.query(ReliefEffort, Address).join(InkindDonationRequirement, InkindDonationRequirement.relief_id == ReliefEffort.id).filter(and_(detail_query, address_query, inkind_query)).limit(c).offset((p-1)*c).all()
+                    case 'volunteer work':
+                        to_return = db.query(ReliefEffort, Address).join(VolunteerRequirement, VolunteerRequirement.relief_id == ReliefEffort.id).filter(and_(detail_query, address_query, vol_query)).limit(c).offset((p-1)*c).all()
+                    case _:
+                        to_return = []
+            case 2:
+                body.needs.sort()
+                match body.needs:
+                    case ['inkind', 'monetary']:
+                        to_return = db.query(ReliefEffort, Address, InkindDonationRequirement).filter(and_(detail_query, address_query, inkind_query, ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
+                    case ['monetary', 'volunteer work']:
+                        to_return = db.query(ReliefEffort, Address, VolunteerRequirement).filter(and_(detail_query, address_query, vol_query, ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
+                    case ['inkind', 'volunteer work']:
+                        to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query, ReliefEffort.monetary_goal == 0)).limit(c).offset((p-1)*c).all()
+                    case _:
+                        to_return = []
+            case _:
+                # all
+                to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query)).limit(c).offset((p-1)*c).all()
+    else:
+        to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query)).limit(c).offset((p-1)*c).all()
+    
+    return to_return
 
 @router.get("/{id}")
 def retrieveReliefEffort(db:DB, id:int):
