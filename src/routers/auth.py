@@ -1,12 +1,13 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_email_handler, get_cache_handler
+from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_email_handler, get_cache_handler, get_code_email_handler
 from services.db.database import Session
 from services.db.models import User, VerificationCode
 from services.log.log_handler import LoggingService
 from services.aws.s3_handler import S3_Handler
 from services.email.email_handler import EmailHandler
+from services.email.code_email_handler import CodeEmailHandler
 from services.storage.cache_handler import CacheHandler
 from util.auth.jwt_util import (
     get_hashed_password,
@@ -40,6 +41,7 @@ Logger = Annotated[LoggingService, Depends(get_logger)]
 S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
 Email_Handler = Annotated[EmailHandler, Depends(get_email_handler)]
 Cache_Handler = Annotated[CacheHandler, Depends(get_cache_handler)]
+code_email_handler = Annotated[CodeEmailHandler, Depends(get_code_email_handler)]
 
 # user levels
 # 0/None - Guest/Anonymous
@@ -70,7 +72,7 @@ async def login(db:DB, form_data: OAuth2PasswordRequestForm = Depends()):
     }
 
 @router.post("/forgot-password", summary="Creates password reset request and sends verification code to user's email.")
-async def forgot_password(email: ForgotPasswordDTO, db:DB, email_handler:Email_Handler, cache_handler:Cache_Handler):
+async def forgot_password(email: ForgotPasswordDTO, db:DB, emailer:code_email_handler, cache_handler:Cache_Handler):
     user:User = db.query(User).filter(User.email == email.email).first()
     if user is None:
         raise HTTPException(
@@ -87,7 +89,7 @@ async def forgot_password(email: ForgotPasswordDTO, db:DB, email_handler:Email_H
     db.commit()
 
     # send email
-    resp = await email_handler.send_code(email.email, f'{user.first_name} {user.last_name}', code)
+    resp = await emailer.send_password_reset_code(email.email, f'{user.first_name} {user.last_name}', code)
 
     return 'Success'
 
@@ -204,6 +206,7 @@ def auth_google(code: str, prompt:str, db:DB):
         user.email = user_info['email']
         user.level = 1
         user.password = user_info['id']
+        user.is_verified = True
         
         db.add(user)
         db.commit()

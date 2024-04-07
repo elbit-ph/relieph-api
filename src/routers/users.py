@@ -1,10 +1,11 @@
 from typing import Annotated, List
 from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user
+from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_code_email_handler
 from services.db.database import Session
-from services.db.models import User, Address, UserUpgradeRequest
+from services.db.models import User, Address, UserUpgradeRequest, VerificationCode
 from services.log.log_handler import LoggingService
 from services.aws.s3_handler import S3_Handler
+from services.email.code_email_handler import CodeEmailHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
 from util.auth.jwt_util import (
@@ -12,10 +13,11 @@ from util.auth.jwt_util import (
 )
 from util.files.image_validator import is_image_valid
 from pydantic import BaseModel, Json
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import and_
 import json
 from types import SimpleNamespace
+from util.code_generator import generate_code
 
 router = APIRouter(
     prefix="/users",
@@ -25,6 +27,7 @@ router = APIRouter(
 
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
+code_email_handler = Annotated[CodeEmailHandler, Depends(get_code_email_handler)]
 S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
 
 class NewAddressDTO(BaseModel):
@@ -86,7 +89,7 @@ class BasicUserDTO(BaseModel):
     mobile: str
 
 @router.post("/personal")
-async def regular_signup(db:DB, res: Response, profile: UploadFile, s3:S3Handler, body:Json = Form()):
+async def regular_signup(db:DB, res: Response, profile: UploadFile, s3:S3Handler, emailer:code_email_handler, body:Json = Form()):
     body:BasicUserDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
 
     # check if email is already used  
@@ -137,10 +140,48 @@ async def regular_signup(db:DB, res: Response, profile: UploadFile, s3:S3Handler
     if resu[1] == False:
         print(f'Profile of user {id} not added correctly.')
 
+    # create verification request
+    verification_request:VerificationCode = VerificationCode()
+    verification_request.code = generate_code()
+    verification_request.reason = 'EMAIL_VERIFICATION'
+    verification_request.user_id = user.id
+    verification_request.expired_at = datetime.utcnow() + timedelta(minutes=30)
+
+    db.add(verification_request)
+    db.commit()
+
+    # send verification code to user
+    ## thru email
+    await emailer.send_email_verfication_code(user.email, user.first_name, verification_request.code)
+
     # also return id    
     return {
         "detail" : "Account successfully created."
     }
+
+@router.post("/personal/verify/{user_email}")
+async def verify_email(user_email:str, code:str, res:Response, db:DB):
+
+    user:User = db.query(User).filter(User.email == user_email).first()
+    if user is None:
+        res.status_code = 404
+        return {'detail' : 'User not found.'}
+    
+    verification_code:VerificationCode = db.query(VerificationCode).join(User).filter(and_(User.email == user_email, User.id == VerificationCode.user_id)).first()
+
+    if verification_code is None:
+        res.status_code = 404
+        return {'detail' : 'No email verification request found.'}
+
+    if verification_code.code != code:
+        res.status_code = 400
+        return {'detail' : 'Nonmatching verification code.'}
+    
+    user.is_verified = True
+    db.delete(verification_code)
+    db.commit()
+
+    return {'Successfully verified email.'}
 
 class UpgradeAccountDTO(BaseModel):
     first_name :str
