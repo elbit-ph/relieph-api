@@ -204,6 +204,7 @@ def auth_google(code: str, prompt:str, db:DB):
         user.email = user_info['email']
         user.level = 1
         user.password = user_info['id']
+        user.is_verified = True
         
         db.add(user)
         db.commit()
