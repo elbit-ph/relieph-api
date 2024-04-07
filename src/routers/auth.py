@@ -19,6 +19,12 @@ from util.auth.auth_tool import authorize
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from pytz import UTC as utc
+import requests
+from sqlalchemy import and_
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 router = APIRouter(
     prefix="/auth",
@@ -156,3 +162,54 @@ async def verify_code(body:PasswordResetModel, db:DB, response:Response):
 def test_authorized(user: User = Depends(get_current_user)):
     authorize(user, 1, 5)
     return {"Hello": "World"}
+
+# Google authentication part
+
+GOOGLE_CLIENT_ID =  os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")
+
+@router.get("/login/google")
+async def login_google():
+    return {
+        "url": f"https://accounts.google.com/o/oauth2/auth?response_type=code&client_id={GOOGLE_CLIENT_ID}&redirect_uri={GOOGLE_REDIRECT_URI}&scope=openid%20profile%20email&access_type=offline"
+    }
+
+@router.get("/auth/google")
+def auth_google(code: str, prompt:str, db:DB):
+    print(code)
+    token_url = "https://accounts.google.com/o/oauth2/token"
+    data = {
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }
+    response = requests.post(token_url, data=data)
+    access_token = response.json().get("access_token")
+    user_info = requests.get("https://www.googleapis.com/oauth2/v1/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+
+    user_info = user_info.json()
+
+    # generate token from user info 
+    user:User = db.query(User).filter(and_(User.email == user_info['email'], User.is_deleted == False)).first()
+
+    if user is None:
+        # creates new user
+        user = User()
+        user.first_name = user_info['given_name']
+        user.last_name = user_info['family_name']
+        user.username = user_info['email'].split('@')[0]
+        user.email = user_info['email']
+        user.level = 1
+        user.password = user_info['id']
+        
+        db.add(user)
+        db.commit()
+    
+    # generate token from details
+    return {
+        "userInfo" : user_info,
+        "token" : create_access_token(user.username, user.level)
+    }
