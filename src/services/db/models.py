@@ -61,7 +61,7 @@ class User(Base):
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
     sponsor_id = Column(Integer)
-
+    is_verified = Column(Boolean, nullable=False, server_default=text("false"))
 
 class InkindDonationRequirement(Base):
     __tablename__ = 'inkind_donation_requirements'
