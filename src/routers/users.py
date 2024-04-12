@@ -1,11 +1,11 @@
 from typing import Annotated, List
 from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_code_email_handler
+from dependencies import get_db_session, get_logger, get_current_user, get_code_email_handler, get_file_handler
 from services.db.database import Session
 from services.db.models import User, Address, UserUpgradeRequest, VerificationCode
 from services.log.log_handler import LoggingService
-from services.aws.s3_handler import S3_Handler
 from services.email.code_email_handler import CodeEmailHandler
+from services.storage.file_handler import FileHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
 from util.auth.jwt_util import (
@@ -28,7 +28,7 @@ router = APIRouter(
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
 code_email_handler = Annotated[CodeEmailHandler, Depends(get_code_email_handler)]
-S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
+_fileHandler = Annotated[FileHandler, Depends(get_file_handler)]
 
 class NewAddressDTO(BaseModel):
     region: str
@@ -39,36 +39,32 @@ class NewAddressDTO(BaseModel):
     coordinates: str
 
 @router.get("/")
-async def retrieveUsers(db: DB, s3:S3Handler, p: int = 1, c: int = 10):
+async def retrieveUsers(db: DB, file_handler:_fileHandler, p: int = 1, c: int = 10):
     # truncate sensitive data - 
-    users = db.query(User.id, User.sponsor_id, User.first_name, User.last_name, User.level).limit(c).offset((p-1)*c).all() 
+    users:List[User] = db.query(User).filter(and_(User.is_deleted == False, User.is_verified == True)).limit(c).offset((p-1)*c).all() 
     to_return = []
     for user in users:
-        # append image link
-        profile_link = s3.get_image(user[0], 'users')
+        profile_link = file_handler.get_user_profile(user.id)
         to_return.append({
-            "id" : user[0],
-            "sponsor_id" : user[1],
-            "first_name" : user[2],
-            "last_name" : user[3],
-            "level" : user[4],
-            "profile" : profile_link[0] if profile_link[1] != False else None
+            "id" : user.id,
+            "sponsor_id" : user.sponsor_id,
+            "first_name" : user.first_name,
+            "last_name" : user.last_name,
+            "level" : user.level,
+            "profile" : profile_link
         })
     return to_return
 
 @router.get("/{id}")
-async def retrieveUser(db:DB, id:int, s3:S3Handler):
+async def retrieveUser(db:DB, id:int, file_handler:_fileHandler):
     user:User = db.query(User).filter(User.id == id).first()
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found."
         )
-    
-    profile_link = await s3.get_image(id, 'users')
 
-    if profile_link[1] == False:
-        profile_link[0] = 'other link'
+    profile_link = file_handler.get_user_profile(id)
 
     return {
         "id": user.id,
@@ -76,7 +72,7 @@ async def retrieveUser(db:DB, id:int, s3:S3Handler):
         "firstname" : user.first_name,
         "lastname" : user.last_name,
         "level" : user.level,
-        "profile" : profile_link[0]
+        "profile" : profile_link
     }
 
 class BasicUserDTO(BaseModel):
@@ -89,7 +85,7 @@ class BasicUserDTO(BaseModel):
     mobile: str
 
 @router.post("/personal")
-async def regular_signup(db:DB, res: Response, profile: UploadFile, s3:S3Handler, emailer:code_email_handler, body:Json = Form()):
+async def regular_signup(db:DB, res: Response, profile: UploadFile, file_handler:_fileHandler, emailer:code_email_handler, body:Json = Form()):
     body:BasicUserDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
 
     # check if email is already used  
@@ -135,7 +131,7 @@ async def regular_signup(db:DB, res: Response, profile: UploadFile, s3:S3Handler
     db.add(user)
     db.commit()
 
-    resu = await s3.upload_single_image(profile, user.id, 'users')
+    resu = await file_handler.upload_file(profile, user.id, 'users')
 
     if resu[1] == False:
         print(f'Profile of user {id} not added correctly.')
@@ -199,7 +195,7 @@ class UpgradeAccountDTO(BaseModel):
     coordinates: str
 
 @router.post("/upgrades")
-async def upgrade_personal_account(db:DB, res: Response, valid_id: UploadFile, s3:S3Handler, body:Json = Form(), user: AuthDetails = Depends(get_current_user)):
+async def upgrade_personal_account(db:DB, res: Response, valid_id: UploadFile, file_handler: _fileHandler, body:Json = Form(), user: AuthDetails = Depends(get_current_user)):
     authorize(user, 1, 1) # only accounts of level 1 can upgrade to personal+
 
     body:UpgradeAccountDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
@@ -237,7 +233,7 @@ async def upgrade_personal_account(db:DB, res: Response, valid_id: UploadFile, s
     db.commit()
     
     # save valid id
-    image_upload_res = await s3.upload_multiple([valid_id], user.user_id, f'valid_ids/{user.user_id}')
+    await file_handler.upload_multiple_file([valid_id], user.user_id, 'valid_ids')
 
     return {'detail' : 'Successfully sent upgrade request.'}
 
@@ -261,7 +257,7 @@ def retrieve_upgrade_requests(db:DB, p: int = 1, c: int = 10, status:str = 'ALL'
     return requests
 
 @router.get("/upgrades/{upgrade_request_id}")
-async def retrieve_upgrade_request(db:DB, s3:S3Handler, res:Response, upgrade_request_id: int, user: AuthDetails = Depends(get_current_user)):
+async def retrieve_upgrade_request(db:DB, file_handler:_fileHandler, res:Response, upgrade_request_id: int, user: AuthDetails = Depends(get_current_user)):
     authorize(user, 4, 4) 
 
     request:UserUpgradeRequest = db.query(UserUpgradeRequest).filter(and_(UserUpgradeRequest.id == upgrade_request_id, UserUpgradeRequest.status == 'PENDING')).first()
@@ -274,8 +270,7 @@ async def retrieve_upgrade_request(db:DB, s3:S3Handler, res:Response, upgrade_re
         'details' : request
     }
 
-    # get images
-    image_res = await s3.retrieve_multiple(request.user_id, f'valid_ids/{user.user_id}')
+    image_res = file_handler.retrieve_files(request.user_id, f'valid_ids/{user.user_id}')
 
     if image_res[1] != False:
         to_return['valid_id'] = image_res[0]
@@ -328,12 +323,12 @@ async def editUserAddress(db:DB, res: Response, body: NewAddressDTO, user: AuthD
         relief_address.owner_type = 'USER'
         null_at_first = True
 
-    relief_address.region = relief_address.region if body.region is "" else body.region
-    relief_address.city = relief_address.city if body.city is "" else body.city
-    relief_address.brgy = relief_address.brgy if body.brgy is "" else body.brgy
-    relief_address.street = relief_address.street if body.street is "" else body.street
-    relief_address.zipcode = relief_address.zipcode if body.zipcode is "" else body.zipcode
-    relief_address.coordinates = relief_address.coordinates if body.coordinates is "" else body.coordinates
+    relief_address.region = relief_address.region if body.region == "" else body.region
+    relief_address.city = relief_address.city if body.city == "" else body.city
+    relief_address.brgy = relief_address.brgy if body.brgy == "" else body.brgy
+    relief_address.street = relief_address.street if body.street == "" else body.street
+    relief_address.zipcode = relief_address.zipcode if body.zipcode == "" else body.zipcode
+    relief_address.coordinates = relief_address.coordinates if body.coordinates == "" else body.coordinates
     relief_address.updated_at = datetime.now()
 
     if null_at_first:
@@ -346,27 +341,21 @@ async def editUserAddress(db:DB, res: Response, body: NewAddressDTO, user: AuthD
     }
 
 @router.post("/profile")
-async def saveUserProfile(image: UploadFile, res:Response, db:DB, s3:S3Handler, user: AuthDetails = Depends(get_current_user)):
+async def saveUserProfile(image: UploadFile, res:Response, db:DB, file_handler:_fileHandler, user: AuthDetails = Depends(get_current_user)):
     # get user id from authentication
     authorize(user, 1, 4)
 
-    if is_image_valid(image) == False:
+    if file_handler.is_file_valid(image, file_handler.allowed_img_suffix) == False:
         res.status_code = 400
         return {"detail" : "Invalid image format."}
 
     # check if file already exists
-    img = s3.get_image(user.user_id, 'users')
+    if file_handler.file_exists(user.user_id, 'users') == True:
+        # delete existing image before uploading
+        await file_handler.remove_file(user.user_id, 'users')
 
-    if (img is not None):
-        # delete currently saved
-        await s3.delete_image(user.user_id, 'users')
-        # save new profile
-        await s3.upload_single_image(image, user.user_id, 'users')
-        return {
-            "detail": "Profile successfully updated."
-        }
-
-    await s3.upload_single_image(image, user.user_id, 'users')
+    # upload file
+    await file_handler.upload_file(image, user.user_id, 'users')
 
     return {
         "detail": "Profile successfully uploaded."
@@ -374,16 +363,13 @@ async def saveUserProfile(image: UploadFile, res:Response, db:DB, s3:S3Handler, 
 
 # get user profile
 @router.get("/{id}/profile")
-def retrieveUserProfile(id:int, res: Response, s3: S3Handler):
-    resu = s3.get_image(id, 'users')
-    
-    if resu[1] != True:
-        res.status_code = 400
-        return {'Error':'User profile retrieval failed.'}
-     
-    return {
-        'link': resu[0]
-    }
+async def retrieveUserProfile(id:int, db:DB, res: Response, file_handler:_fileHandler):
+    if db.query(User).filter(and_(User.id == id, User.is_deleted == False, User.is_verified == True)).first() == None:
+        res.status_code = 404
+        return {'detail' : 'User not found.'}
+
+    profile_link = await file_handler.get_user_profile(id)
+    return profile_link
 
 @router.delete("/{id}")
 async def deleteUser(db:DB, id:int, res: Response, user:AuthDetails = Depends(get_current_user)):
