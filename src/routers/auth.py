@@ -1,14 +1,12 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_email_handler, get_cache_handler, get_code_email_handler
+from dependencies import get_db_session, get_logger, get_current_user, get_email_handler, get_code_email_handler
 from services.db.database import Session
 from services.db.models import User, VerificationCode
 from services.log.log_handler import LoggingService
-from services.aws.s3_handler import S3_Handler
 from services.email.email_handler import EmailHandler
 from services.email.code_email_handler import CodeEmailHandler
-from services.storage.cache_handler import CacheHandler
 from util.auth.jwt_util import (
     get_hashed_password,
     verify_password,    
@@ -38,9 +36,7 @@ class ForgotPasswordDTO(BaseModel):
 
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
-S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
 Email_Handler = Annotated[EmailHandler, Depends(get_email_handler)]
-Cache_Handler = Annotated[CacheHandler, Depends(get_cache_handler)]
 code_email_handler = Annotated[CodeEmailHandler, Depends(get_code_email_handler)]
 
 # user levels
@@ -72,7 +68,7 @@ async def login(db:DB, form_data: OAuth2PasswordRequestForm = Depends()):
     }
 
 @router.post("/forgot-password", summary="Creates password reset request and sends verification code to user's email.")
-async def forgot_password(email: ForgotPasswordDTO, db:DB, emailer:code_email_handler, cache_handler:Cache_Handler):
+async def forgot_password(email: ForgotPasswordDTO, db:DB, emailer:code_email_handler):
     user:User = db.query(User).filter(User.email == email.email).first()
     if user is None:
         raise HTTPException(
@@ -82,7 +78,7 @@ async def forgot_password(email: ForgotPasswordDTO, db:DB, emailer:code_email_ha
     # generate code
     code = generate_code()
     # store code to db
-    #cache_handler.set(f'pwr-{user.id}', code)
+    
     vcode_req = VerificationCode(code=code,reason="PASSWORD-RESET",user_id=user.id,expired_at=datetime.utcnow() + timedelta(minutes=30))
     print(vcode_req.reason)
     db.add(vcode_req)
