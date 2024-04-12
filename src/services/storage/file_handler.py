@@ -20,14 +20,14 @@ class FileHandler():
         )
     
     # checks existence of particular file
-    def is_file_existent(self, filename:str):
+    async def is_file_existent(self, filename:str):
         if self.handler.get_object(self.bucket_name, filename) == None:
             # file non-existent
             return False
         return True
 
     # retrieves file from object store
-    def retrieve_file(self, id:int, from_:str):
+    async def retrieve_file(self, id:int, from_:str):
         if from_ not in self.allowed_directories:
             return ('InvalidDirectory', False)
         to_return = ""
@@ -48,7 +48,7 @@ class FileHandler():
         return (presigned_url, True)
     
     # retrieve multiple files
-    def retrieve_files(self, id:int, from_:str):
+    async def retrieve_files(self, id:int, from_:str):
         dir_to_return = ""
         
         # find directory to return
@@ -167,13 +167,13 @@ class FileHandler():
 
         return ('Success', True)
     
-    def is_file_valid(self, file:UploadFile, allowed_suffixes:List[str]):
+    async def is_file_valid(self, file:UploadFile, allowed_suffixes:List[str]):
         if file.filename.split('.')[-1] not in allowed_suffixes:
             # suffix is not in allowed suffixes
             return False
         return True
     
-    def are_files_valid(self, files:List[UploadFile], allowed_suffixes:List[str]):
+    async def are_files_valid(self, files:List[UploadFile], allowed_suffixes:List[str]):
         for file in files:
             if file.filename.split('.')[-1] not in allowed_suffixes:
                 # suffix is not in allowed suffixes
@@ -181,9 +181,26 @@ class FileHandler():
             
         return True
     
-    def get_user_profile(self, id:int):
+    async def file_exists(self, id:int, from_:str):
+        if from_ not in self.allowed_directories:
+            return False
+
+        # iterate thru object store for file
+        for obj in self.handler.list_objects(self.bucket_name, prefix=from_, recursive=True):
+            if obj.object_name.split('/')[-1].split('.')[0] == str(id):
+                print(obj.object_name)
+                return True
+
+        return False
+    
+    async def get_user_profile(self, id:int):
         resu = self.retrieve_file(id, 'users')
         if resu[1] == False:
-            # default = self.handler.get_object(self.bucket_name, 'users/default_profile.png')
             return self.handler.presigned_get_object(self.bucket_name, 'users/default_profile.png')
+        return resu[0]
+    
+    async def get_org_profile(self, id:int):
+        resu = self.retrieve_file(id, 'organizations')
+        if resu[1] == False:
+            return self.handler.presigned_get_object(self.bucket_name, 'organizations/default.png')
         return resu[0]
