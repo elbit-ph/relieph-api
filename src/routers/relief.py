@@ -1,18 +1,17 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Body, Form
-from fastapi.encoders import jsonable_encoder
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_relief_email_handler
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Form
+from dependencies import get_db_session, get_logger, get_current_user, get_relief_email_handler, get_file_handler
 from services.db.database import Session
 from services.db.models import Organization, User, Address, ReliefEffort, ReliefBookmark, ReliefComment, InkindDonationRequirement, VolunteerRequirement, ReliefUpdate
 from services.log.log_handler import LoggingService
-from services.aws.s3_handler import S3_Handler
+from services.storage.file_handler import FileHandler
 from services.email.relief_email_handler import ReliefEmailHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
 from util.files.image_validator import is_image_valid
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from datetime import datetime, date
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from typing import List
 from pydantic import Json
 import json
@@ -26,12 +25,70 @@ router = APIRouter(
 
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
-S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
+_fileHandler = Annotated[FileHandler, Depends(get_file_handler)]
 ReliefEmail = Annotated[ReliefEmailHandler, Depends(get_relief_email_handler)]
 
+class ReliefEffortRetrievalDTO(BaseModel):
+    keyword: str = ""
+    category: str = "all"
+    location: str = ""
+    needs: List[str] = ['Monetary', 'Inkind', 'Volunteer Work']
+
+valid_needs = ['Monetary', 'Inkind', 'Volunteer Work']
+
 @router.get("/")
-def retrieveReliefEfforts(db: DB, p: int = 1, c: int = 10):
-    return db.query(ReliefEffort).limit(c).offset((p-1)*c).all()
+def retrieveReliefEfforts(db: DB, body:ReliefEffortRetrievalDTO, p: int = 1, c: int = 10):
+    to_return = []
+    
+    detail_query = and_(ReliefEffort.is_active == True, ReliefEffort.disaster_type.contains(body.category), ReliefEffort.name.contains(body.keyword))
+    
+    address_query = None
+
+    splitted_loc = body.location.split(', ')
+
+    if len(splitted_loc) == 2:
+        address_query = and_(Address.owner_id == ReliefEffort.id, Address.city == splitted_loc[0], Address.region == splitted_loc[1])
+    else:
+        address_query = and_(Address.owner_id == ReliefEffort.id)
+    
+    inkind_query = and_(InkindDonationRequirement.relief_id == ReliefEffort.id, InkindDonationRequirement.is_deleted == False)
+
+    vol_query = and_(VolunteerRequirement.relief_id == ReliefEffort.id, VolunteerRequirement.is_deleted == False)
+
+    if len(body.needs) < 3 or body.needs != valid_needs.sort():
+        # some needs
+        for i in range(0, len(body.needs)):
+            body.needs[i] = body.needs[i].lower()
+
+        match len(body.needs):
+            case 1:
+                match body.needs[0]:
+                    case 'monetary':
+                        to_return = db.query(ReliefEffort, Address).filter(or_(ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
+                    case 'inkind':
+                        to_return = db.query(ReliefEffort, Address).join(InkindDonationRequirement, InkindDonationRequirement.relief_id == ReliefEffort.id).filter(and_(detail_query, address_query, inkind_query)).limit(c).offset((p-1)*c).all()
+                    case 'volunteer work':
+                        to_return = db.query(ReliefEffort, Address).join(VolunteerRequirement, VolunteerRequirement.relief_id == ReliefEffort.id).filter(and_(detail_query, address_query, vol_query)).limit(c).offset((p-1)*c).all()
+                    case _:
+                        to_return = []
+            case 2:
+                body.needs.sort()
+                match body.needs:
+                    case ['inkind', 'monetary']:
+                        to_return = db.query(ReliefEffort, Address, InkindDonationRequirement).filter(and_(detail_query, address_query, inkind_query, ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
+                    case ['monetary', 'volunteer work']:
+                        to_return = db.query(ReliefEffort, Address, VolunteerRequirement).filter(and_(detail_query, address_query, vol_query, ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
+                    case ['inkind', 'volunteer work']:
+                        to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query, ReliefEffort.monetary_goal == 0)).limit(c).offset((p-1)*c).all()
+                    case _:
+                        to_return = []
+            case _:
+                # all
+                to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query)).limit(c).offset((p-1)*c).all()
+    else:
+        to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query)).limit(c).offset((p-1)*c).all()
+    
+    return to_return
 
 @router.get("/{id}")
 def retrieveReliefEffort(db:DB, id:int):
@@ -71,20 +128,20 @@ class CreateReliefEffortDTO(BaseModel):
     volunteer_requirements: list # object list {type, slots, duration}
     sponsor_message: str = None
 
-@router.get("/{id}/images")
-async def test(db:DB, id:int, s3_handler:S3Handler, res: Response):
-    resu = await s3_handler.retrieve_multiple(id, f'relief-efforts/{id}/main')
-    if resu[0] is "ImagesNonExistent":
-        res.status_code = 404
-        return {"detail" : "Relief images non-existent."}
-    if resu[0] is "ErrorPresigning":
-        res.status_code = 500
-        return {"detail" : "Error generating images' urls"}
-    return resu[0]
+# @router.get("/{id}/images")
+# async def test(db:DB, id:int, file_handler:_fileHandler, res: Response):
+#     resu = await file_handler.retrieve_files(id, f'relief-efforts/{id}/main')
+#     if resu[0] is "ImagesNonExistent":
+#         res.status_code = 404
+#         return {"detail" : "Relief images non-existent."}
+#     if resu[0] is "ErrorPresigning":
+#         res.status_code = 500
+#         return {"detail" : "Error generating images' urls"}
+#     return resu[0]
 
 @router.post("/user")
-async def createReliefEffortAsIndividual(db:DB, s3_handler:S3Handler, res: Response, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 2, 5)
+async def createReliefEffortAsIndividual(db:DB, file_handler:_fileHandler, res: Response, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+    authorize(user, 2, 4)
     
     # IDEA: check how many relief effort an individual first has
     # limit the amount of relief effort an indivdual can create
@@ -123,7 +180,7 @@ async def createReliefEffortAsIndividual(db:DB, s3_handler:S3Handler, res: Respo
     
     # save images
 
-    resu = await s3_handler.upload_multiple(images, relief.id, f'relief-efforts/{relief.id}/main')
+    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/{relief.id}/main')
 
     if resu[1] == False:
         # do not terminate outright
@@ -174,8 +231,8 @@ async def createReliefEffortAsIndividual(db:DB, s3_handler:S3Handler, res: Respo
     return {"detail": "Relief effort successfully created"}
 
 @router.post("/organization/{id}")
-async def createReliefEffortAsOrganization(db:DB, s3_handler:S3Handler, res: Response, id: int, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 2, 5)
+async def createReliefEffortAsOrganization(db:DB, file_handler:_fileHandler, res: Response, id: int, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+    authorize(user, 2, 4)
 
     # IDEA: check how many relief effort an individual first has
     # limit the amount of relief effort an indivdual can create
@@ -187,7 +244,6 @@ async def createReliefEffortAsOrganization(db:DB, s3_handler:S3Handler, res: Res
     body.end_date = date.fromisoformat(body.end_date)
 
     org: Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False, Organization.is_active == True)).first()
-
 
     if org is None:
         res.status_code = 404
@@ -224,7 +280,7 @@ async def createReliefEffortAsOrganization(db:DB, s3_handler:S3Handler, res: Res
     db.add(relief)
     db.commit()
 
-    resu = await s3_handler.upload_multiple(images, relief.id, f'relief-efforts/{relief.id}/main')
+    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/{relief.id}/main')
 
     if resu[1] == False:
         # do not terminate outright
@@ -259,7 +315,6 @@ async def createReliefEffortAsOrganization(db:DB, s3_handler:S3Handler, res: Res
     db.commit()
 
     # save volunteer requirements
-
     volunter_requirement_list = []
 
     for v_r in body.volunteer_requirements:
@@ -271,8 +326,6 @@ async def createReliefEffortAsOrganization(db:DB, s3_handler:S3Handler, res: Res
     
     db.add_all(volunter_requirement_list)
     db.commit()
-
-    # add images
 
     if org.tier > 1:
         # automatically set relief to active if org tier
@@ -288,7 +341,7 @@ async def createReliefEffortAsOrganization(db:DB, s3_handler:S3Handler, res: Res
 
 @router.patch("/approve/{id}")
 async def approveReliefEffort(db:DB, id:int, res: Response, relief_email_handler: ReliefEmail, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 2, 5)
+    authorize(user, 2, 4)
 
     # TO FOLLOW: allow foundations to approve relief efforts so long
     # as organization is sponsored/supported by said foundation
@@ -330,7 +383,7 @@ async def approveReliefEffort(db:DB, id:int, res: Response, relief_email_handler
 
 @router.patch("/reject/{id}")
 async def rejectReliefEffort(db:DB, id:int, res: Response, relief_email_handler: ReliefEmail, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 5, 5)
+    authorize(user, 4, 4)
 
     # TO FOLLOW: allow foundations to reject relief efforts so long
     # as organization is sponsored/supported by said foundation
@@ -353,7 +406,7 @@ async def rejectReliefEffort(db:DB, id:int, res: Response, relief_email_handler:
         org:Organization = db.query(Organization).filter(and_(Organization.id == relief.owner_id)).first()
         foundation:Organization = db.query(Organization).filter(and_(Organization.id == org.sponsor_id)).first()
 
-        if user.level != 5 and (foundation is None or user.user_id != foundation.owner_id):
+        if user.level != 4 and (foundation is None or user.user_id != foundation.owner_id):
             res.status_code = 403
             return {'detail' : 'Not authorized'}
         
@@ -374,7 +427,7 @@ async def rejectReliefEffort(db:DB, id:int, res: Response, relief_email_handler:
 
 @router.delete("/{id}")
 async def deleteReliefEffort(db:DB, id:int, res: Response, relief_email_handler: ReliefEmail, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 5, 5) # only admins can take down relief efforts
+    authorize(user, 4, 4) # only admins can take down relief efforts
 
     relief:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == id, ReliefEffort.is_deleted == False)).first()
 
@@ -409,14 +462,14 @@ async def deleteReliefEffort(db:DB, id:int, res: Response, relief_email_handler:
 
 @router.get("/bookmarks/")
 def retrieveBookmarks(db:DB, res:Response, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 1,5)
+    authorize(user, 1, 4)
     print(user)
     bookmarks = db.query(ReliefBookmark).filter(and_(ReliefBookmark.user_id == user.user_id)).all()
     return bookmarks
 
 @router.post("/{id}/bookmarks")
 def bookmarkReliefEffort(db:DB, id:int, res:Response, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 1, 5)
+    authorize(user, 1, 4)
 
     relief: ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == id, ReliefEffort.is_active == True)).first()
 
@@ -442,7 +495,7 @@ def bookmarkReliefEffort(db:DB, id:int, res:Response, user: AuthDetails = Depend
 
 @router.delete("/{id}/bookmarks")
 def unbookmarkReliefEffort(db:DB, id:int, res:Response, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 1, 5)
+    authorize(user, 1, 4)
     
     bookmark:ReliefBookmark = db.query(ReliefBookmark).filter(and_(ReliefBookmark.user_id == user.user_id, ReliefBookmark.relief_id == id)).first()
 
@@ -467,7 +520,7 @@ class ReliefCommentDTO(BaseModel):
 @router.post("/{id}/comments")
 def createComment(db:DB, id:int, body: ReliefCommentDTO, res:Response, user: AuthDetails = Depends(get_current_user)):
     # create and save comment
-    authorize(user, 2, 5)
+    authorize(user, 2, 4)
 
     if body.message == None or body.message == "":
         res.status_code = 400
@@ -492,7 +545,7 @@ def createComment(db:DB, id:int, body: ReliefCommentDTO, res:Response, user: Aut
 
 @router.delete("/{id}/comments/{comment_id}")
 def deleteComment(db:DB, id:int, comment_id:int, res:Response, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 2,5)
+    authorize(user, 2, 4)
 
     comment:ReliefComment = db.query(ReliefComment).filter(and_(ReliefComment.relief_id == id, ReliefComment.id == comment_id, ReliefComment.is_deleted == False)).first()
 
@@ -500,7 +553,7 @@ def deleteComment(db:DB, id:int, comment_id:int, res:Response, user: AuthDetails
         res.status_code = 404
         return {"detail" : "Comment not found"}
     
-    if user.level != 5 and user.user_id != comment.user_id:
+    if user.level != 4 and user.user_id != comment.user_id:
         res.status_code = 403
         return {"detail" : "Forbidden deletion"}
     
@@ -529,8 +582,8 @@ def retrieveUpdates(db:DB, id:int, f: str = None):
 
 # endpoint to get images of updates
 @router.get("/{id}/updates/{update_id}/images")
-async def retrieveUpdateImages(db:DB, id:int, res:Response, update_id:int, s3_handler: S3Handler):
-    resu = await s3_handler.retrieve_multiple(id, f'relief-efforts/{id}/updates/{update_id}')
+async def retrieveUpdateImages(db:DB, id:int, res:Response, update_id:int, file_handler:_fileHandler):
+    resu = await file_handler.retrieve_files(id, f'relief-efforts/{id}/updates/{update_id}')
 
     if resu[1] == False:
         res.status_code = 404
@@ -546,9 +599,9 @@ class CreateUpdateDTO(BaseModel):
     type: str = None
 
 @router.post("/{id}/updates")
-async def createUpdate(db:DB, id:int, s3_handler: S3Handler, res:Response, body: Json = Form(), images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 2, 5)
-    print(body)
+async def createUpdate(db:DB, id:int, file_handler:_fileHandler, res:Response, body: Json = Form(), images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
+    authorize(user, 2, 4)
+    
     body:CreateUpdateDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
     
     # check if relief exists
@@ -600,7 +653,7 @@ async def createUpdate(db:DB, id:int, s3_handler: S3Handler, res:Response, body:
     db.commit()
 
     #    add images
-    await s3_handler.upload_multiple(images, id, f'relief-efforts/{id}/updates/{update.id}')
+    await file_handler.upload_multiple_file(images, id, f'relief-efforts/{id}/updates/{update.id}')
 
     return {"detail": "Successfully created update."}
 
@@ -610,7 +663,7 @@ class ReliefUpdateStatusDTO(BaseModel):
     phase: str
 
 @router.patch("/{id}/phase")
-async def updateReliefPhase(db:DB, id:int, s3_handler: S3Handler, res:Response, body: ReliefUpdateStatusDTO, user: AuthDetails = Depends(get_current_user)):
+async def updateReliefPhase(db:DB, id:int, res:Response, body: ReliefUpdateStatusDTO, user: AuthDetails = Depends(get_current_user)):
     authorize(user, 2, 5)
     
     # check if relief exists
