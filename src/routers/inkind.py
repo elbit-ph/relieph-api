@@ -1,13 +1,12 @@
 from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user
+from dependencies import get_db_session, get_logger, get_current_user
 from services.db.database import Session
 from services.db.models import Organization, InkindDonation, InkindDonationRequirement, ReliefEffort
 from dependencies import get_db_session
 from sqlalchemy import and_
 from services.log.log_handler import LoggingService
-from services.aws.s3_handler import S3_Handler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
 from datetime import date, datetime
@@ -20,7 +19,6 @@ router = APIRouter(
 
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
-S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
 
 class InKind(BaseModel):
     name: str
