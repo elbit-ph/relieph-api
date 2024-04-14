@@ -14,7 +14,6 @@ from services.email.relief_email_handler import ReliefEmailHandler
 from services.email.organization_email_handler import OrganizationEmailHandler
 from services.email.code_email_handler import CodeEmailHandler
 from services.log.log_handler import LoggingService
-from services.aws.s3_handler import S3_Handler
 from services.storage.file_handler import FileHandler
 from models.auth_details import AuthDetails
 
@@ -40,9 +39,6 @@ async def get_code_email_handler():
 
 def get_logger():
     return LoggingService('file.log')
-
-def get_s3_handler():
-    return S3_Handler()
 
 def get_file_handler():
     return FileHandler()

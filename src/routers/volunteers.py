@@ -1,10 +1,9 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user
+from dependencies import get_db_session, get_logger, get_current_user
 from services.db.database import Session
 from services.db.models import Volunteer, VolunteerRequirement, ReliefEffort, User, Address
 from services.log.log_handler import LoggingService
-from services.aws.s3_handler import S3_Handler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
 from sqlalchemy import and_
@@ -22,7 +21,6 @@ router = APIRouter(
 
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
-S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
 
 @router.get("/{id}")
 def retrieveVolunteers(db:DB, id:int, p: int = 1, c: int = 10):

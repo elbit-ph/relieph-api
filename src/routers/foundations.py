@@ -1,10 +1,9 @@
 from typing import Annotated, List
 from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
-from dependencies import get_db_session, get_logger, get_s3_handler, get_current_user, get_organization_email_handler
+from dependencies import get_db_session, get_logger, get_current_user, get_organization_email_handler
 from services.db.database import Session
 from services.db.models import Organization, User, Address, SponsorshipRequest
 from services.log.log_handler import LoggingService
-from services.aws.s3_handler import S3_Handler
 from services.email.organization_email_handler import OrganizationEmailHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
@@ -22,7 +21,6 @@ router = APIRouter(
 
 DB = Annotated[Session, Depends(get_db_session)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
-S3Handler = Annotated[S3_Handler, Depends(get_s3_handler)]
 
 
 # NOTE: foundations are organizations with tier level 4
