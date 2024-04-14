@@ -5,8 +5,8 @@ from sqlalchemy.ext.declarative import declarative_base
 
 from .database import Base, Session, engine
 
+Base = declarative_base()
 metadata = Base.metadata
-
 
 class Address(Base):
     __tablename__ = 'addresses'
@@ -34,8 +34,6 @@ class ReliefEffort(Base):
     disaster_type = Column(String(80), nullable=False)
     name = Column(String(100), nullable=False)
     description = Column(String(255), nullable=False)
-    purpose = Column(Text)
-    gallery_dir = Column(String(255))
     monetary_goal = Column(Numeric, server_default=text("0.00"))
     phase = Column(String(50), nullable=False, server_default=text("'Preparing'::character varying"))
     is_active = Column(Boolean, server_default=text("false"))
@@ -44,6 +42,8 @@ class ReliefEffort(Base):
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
+    account_number = Column(String(100))
+    money_platform = Column(String(200))
 
 
 class User(Base):
@@ -56,12 +56,12 @@ class User(Base):
     password = Column(String(255), server_default=text("NULL::character varying"))
     email = Column(String(255), server_default=text("NULL::character varying"))
     mobile = Column(String(255), server_default=text("NULL::character varying"))
-    profile_dir = Column(String(255), server_default=text("NULL::character varying"))
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
+    level = Column(SmallInteger, nullable=False, server_default=text("0"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
-    level = Column(SmallInteger, nullable=False, server_default=text("0"))
-
+    sponsor_id = Column(Integer)
+    is_verified = Column(Boolean, nullable=False, server_default=text("false"))
 
 class InkindDonationRequirement(Base):
     __tablename__ = 'inkind_donation_requirements'
@@ -87,7 +87,6 @@ class Organization(Base):
     tier = Column(Integer, nullable=False)
     name = Column(String(100), nullable=False)
     description = Column(String(255), nullable=False)
-    media_dir = Column(String(255), server_default=text("NULL::character varying"))
     is_active = Column(Boolean, server_default=text("false"))
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
@@ -172,6 +171,37 @@ class UsedMoney(Base):
     updated_at = Column(DateTime(True))
 
     relief = relationship('ReliefEffort')
+
+
+class UserUpgradeRequest(Base):
+    __tablename__ = 'user_upgrade_requests'
+
+    id = Column(Integer, primary_key=True, server_default=text("nextval('user_upgrade_requests_id_seq'::regclass)"))
+    user_id = Column(ForeignKey('users.id'), nullable=False)
+    first_name = Column(String(255), nullable=False)
+    last_name = Column(String(255), nullable=False)
+    sex = Column(String(50), nullable=False)
+    birthday = Column(Date, nullable=False)
+    accountno = Column(String(60), nullable=False)
+    id_type = Column(String(100), nullable=False)
+    status = Column(String(50), nullable=False, server_default=text("'PENDING'::character varying"))
+    created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(True))
+
+    user = relationship('User')
+
+
+class VerificationCode(Base):
+    __tablename__ = 'verification_codes'
+
+    id = Column(Integer, primary_key=True, server_default=text("nextval('verification_codes_id_seq'::regclass)"))
+    user_id = Column(ForeignKey('users.id'), nullable=False)
+    code = Column(String(50), nullable=False)
+    reason = Column(String(50), nullable=False)
+    created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    expired_at = Column(DateTime(True), nullable=False)
+
+    user = relationship('User')
 
 
 class VolunteerRequirement(Base):

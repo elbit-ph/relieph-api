@@ -3,16 +3,18 @@ from typing import Annotated
 from fastapi import Header, HTTPException, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from datetime import datetime
-from jose import jwt
 from pydantic import ValidationError
 import os
 # user generated
 from services.db.database import Session
 from services.db.models import User
-from services.storage.cache_handler import CacheHandler
+# from services.storage.cache_handler import CacheHandler
 from services.email.email_handler import EmailHandler
+from services.email.relief_email_handler import ReliefEmailHandler
+from services.email.organization_email_handler import OrganizationEmailHandler
+from services.email.code_email_handler import CodeEmailHandler
 from services.log.log_handler import LoggingService
-from services.aws.s3_handler import S3_Handler
+from services.storage.file_handler import FileHandler
 from models.auth_details import AuthDetails
 
 # dependencies go here
@@ -20,17 +22,26 @@ from models.auth_details import AuthDetails
 async def get_db_session():
     return Session()
 
-async def get_cache_handler():
-    return CacheHandler()
+# async def get_cache_handler():
+#     return CacheHandler()
 
 async def get_email_handler():
     return EmailHandler()
 
+async def get_relief_email_handler():
+    return ReliefEmailHandler()
+
+async def get_organization_email_handler():
+    return OrganizationEmailHandler()
+
+async def get_code_email_handler():
+    return CodeEmailHandler()
+
 def get_logger():
     return LoggingService('file.log')
 
-def get_s3_handler():
-    return S3_Handler()
+def get_file_handler():
+    return FileHandler()
 
 reuseable_oauth = OAuth2PasswordBearer(
         tokenUrl="/login",
