@@ -1,13 +1,20 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Body
 from dependencies import get_db_session, get_logger, get_current_user
 from services.db.database import Session
-from services.db.models import ReliefEffort, Organization, ReceivedMoney, UsedMoney
+from services.db.models import ReliefEffort, Organization, ReceivedMoney, UsedMoney, ReliefPaymentKey, User
 from services.log.log_handler import LoggingService
+from services.payment.payment_handler import PaymentHandler;
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
 from sqlalchemy import and_
 from pydantic import BaseModel
+import os
+from dotenv import load_dotenv
+from cryptography.fernet import Fernet
+from base64 import urlsafe_b64encode
+
+load_dotenv()
 
 router = APIRouter(
     prefix="/monetary",
@@ -16,7 +23,9 @@ router = APIRouter(
 )
 
 DB = Annotated[Session, Depends(get_db_session)]
+db_handler = Session()
 Logger = Annotated[LoggingService, Depends(get_logger)]
+payment_handler = PaymentHandler(os.environ.get("ENCRYPTION"))
 
 # ==========================
 
@@ -242,4 +251,73 @@ def create_expense_record (relief_id:int, res:Response, db:DB, body:UsedMoneyDTO
        return {"details": "Expense record created.",
               "used_money_id": used_money.id}
 
+class MayaKeyDTO(BaseModel):
+      pkey:str
+      skey:str
 
+@router.post("/register/maya/{owner_type}/{owner_id}")
+async def register_maya_receiver(owner_type:str, owner_id:int, body:MayaKeyDTO, res:Response, db:DB, user:AuthDetails = Depends(get_current_user)):
+       # implement authorization here
+       authorize(user, 2, 4)
+
+       if is_authorized(owner_id, owner_type, user, db) == False:
+             return {'detail': 'User not authorized for action.'}
+       
+       resu = await payment_handler.save_maya_api_key(owner_id, owner_type, body.pkey, body.skey)
+       
+       if resu[1] == False:
+              res.status_code = 400
+              return {'detail' : 'Existing API Key for account.'}
+      
+       return {'detail' : 'Successfully saved a maya receiver'}
+
+@router.post("/maya")
+async def create_maya_checkout(relief_id:int, amount:float, res:Response, db:DB):
+       resu = await payment_handler.create_payment_session(relief_id, amount)
+
+       if resu[1] == False:
+             match resu[0]:
+                     case "ReliefEffortNonexistent":
+                            res.status_code = 404
+                            return {'detail': 'Relief effort non existent'}
+                     case _:
+                            res.status_code = 500
+                            return {'detail' : 'Server-side error'}
+       # resu contains checkoutId and redirectUrl
+       return resu[0]['redirectUrl']
+
+@router.get("/maya/redirect")
+async def record_payment(status:str, rrn:str, relief_id:int, req:Request, res:Response, donor_id:int = 0):
+       # add condition that this endpoint only accepts traffic from Maya
+
+       relief:ReliefEffort = db_handler.query(ReliefEffort).filter(and_(ReliefEffort.id == relief_id, ReliefEffort.is_active == True)).first()
+
+       if relief is None:
+             return {'detail' : 'Non-existent relief effort.'}
+       
+       user:User = db_handler.query(User).filter(and_(User.id == donor_id, User.is_deleted == False)).first()
+
+       if user is None:
+             donor_id = 0 # anonymous donation
+       
+       match status:
+             case 'success':
+                   # continue
+                   res.status_code = 200
+             case 'failure':
+                   res.status_code = 400
+                   return {'detail' : 'Payment was unsuccessful.'}
+             case 'cancel':
+                   res.status_code = 400
+                   return {'detail' : 'Payment was cancelled'}
+             case _:
+                   res.status_code = 400
+                   return {'detail' : 'Invalid status.'}
+
+       resu = await payment_handler.record_maya_payment(rrn, relief_id, donor_id)
+
+       if resu[1] == False:
+             res.status_code = 400
+             return {'detail': 'Payment was unsuccessful.'}
+
+       return {'detail' : 'Payment successfully recorded'}

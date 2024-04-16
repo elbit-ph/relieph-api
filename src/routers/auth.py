@@ -165,7 +165,6 @@ def test_authorized(user: User = Depends(get_current_user)):
 
 GOOGLE_CLIENT_ID =  os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")
 
 @router.get("/login/google")
 async def login_google():
@@ -181,7 +180,7 @@ def auth_google(code: str, prompt:str, db:DB):
         "code": code,
         "client_id": GOOGLE_CLIENT_ID,
         "client_secret": GOOGLE_CLIENT_SECRET,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "redirect_uri": f'{os.environ.get("BASE_URL")}/api/auth/auth/google',
         "grant_type": "authorization_code",
     }
     response = requests.post(token_url, data=data)

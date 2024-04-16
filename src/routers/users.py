@@ -42,9 +42,11 @@ class NewAddressDTO(BaseModel):
 async def retrieveUsers(db: DB, file_handler:_fileHandler, p: int = 1, c: int = 10):
     # truncate sensitive data - 
     users:List[User] = db.query(User).filter(and_(User.is_deleted == False, User.is_verified == True)).limit(c).offset((p-1)*c).all() 
+    
     to_return = []
+    
     for user in users:
-        profile_link = file_handler.get_user_profile(user.id)
+        profile_link = await file_handler.get_user_profile(user.id)
         to_return.append({
             "id" : user.id,
             "sponsor_id" : user.sponsor_id,
@@ -64,7 +66,7 @@ async def retrieveUser(db:DB, id:int, file_handler:_fileHandler):
             detail="User not found."
         )
 
-    profile_link = file_handler.get_user_profile(id)
+    profile_link = await file_handler.get_user_profile(id)
 
     return {
         "id": user.id,
@@ -163,7 +165,7 @@ async def verify_email(user_email:str, code:str, res:Response, db:DB):
         res.status_code = 404
         return {'detail' : 'User not found.'}
     
-    verification_code:VerificationCode = db.query(VerificationCode).join(User).filter(and_(User.email == user_email, User.id == VerificationCode.user_id)).first()
+    verification_code:VerificationCode = db.query(VerificationCode).filter(and_(VerificationCode.user_id == user.id, VerificationCode.reason == "EMAIL_VERIFICATION")).first()
 
     if verification_code is None:
         res.status_code = 404
@@ -174,6 +176,7 @@ async def verify_email(user_email:str, code:str, res:Response, db:DB):
         return {'detail' : 'Nonmatching verification code.'}
     
     user.is_verified = True
+
     db.delete(verification_code)
     db.commit()
 
@@ -205,6 +208,13 @@ async def upgrade_personal_account(db:DB, res: Response, valid_id: UploadFile, f
         res.status_code = 400
         return {'detail' : 'Invalid image.'}
 
+    # save valid id
+    resu = await file_handler.upload_multiple_file([valid_id], user.user_id, 'valid_ids')
+
+    if resu[1] == False:
+        res.status_code = 500
+        return {'detail': 'Error uploading image.'}
+
     # create account upgrade request
     upgrade_request = UserUpgradeRequest()
     
@@ -231,9 +241,6 @@ async def upgrade_personal_account(db:DB, res: Response, valid_id: UploadFile, f
     db.add(upgrade_request)
     db.add(address)
     db.commit()
-    
-    # save valid id
-    await file_handler.upload_multiple_file([valid_id], user.user_id, 'valid_ids')
 
     return {'detail' : 'Successfully sent upgrade request.'}
 
@@ -256,6 +263,18 @@ def retrieve_upgrade_requests(db:DB, p: int = 1, c: int = 10, status:str = 'ALL'
 
     return requests
 
+@router.get("/upgrades/{upgrade_request_id}/valid-id")
+def retrieve_valid_id(upgrade_request_id:int, db:DB, file_handler:_fileHandler, user: AuthDetails = Depends(get_current_user)):
+    # check if user is authorized
+    authorize(user, 4, 4)
+
+    # retrieve valid id
+    return
+
+    # return file
+    
+
+
 @router.get("/upgrades/{upgrade_request_id}")
 async def retrieve_upgrade_request(db:DB, file_handler:_fileHandler, res:Response, upgrade_request_id: int, user: AuthDetails = Depends(get_current_user)):
     authorize(user, 4, 4) 
@@ -270,7 +289,7 @@ async def retrieve_upgrade_request(db:DB, file_handler:_fileHandler, res:Respons
         'details' : request
     }
 
-    image_res = file_handler.retrieve_files(request.user_id, f'valid_ids/{user.user_id}')
+    image_res = await file_handler.retrieve_files(request.user_id, f'valid_ids/{user.user_id}')
 
     if image_res[1] != False:
         to_return['valid_id'] = image_res[0]
