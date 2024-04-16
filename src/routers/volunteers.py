@@ -73,10 +73,10 @@ def editVolunteerRequirements(body:VolunteerRequirementsDTO, db:DB, res:Response
         res.status_code = 404
         return {"detail": "Volunteer requirements non-existent"}
     
-    volunteerRequirement.name = volunteerRequirement.name if body.name is "" else body.name
-    volunteerRequirement.description = volunteerRequirement.ndescriptioname if body.description is "" else body.description
-    volunteerRequirement.count = volunteerRequirement.count if body.count is "" else body.count
-    volunteerRequirement.duration_days = volunteerRequirement.duration_days if body.duration_days is "" else body.duration_days
+    volunteerRequirement.name = volunteerRequirement.name if body.name == "" else body.name
+    volunteerRequirement.description = volunteerRequirement.ndescriptioname if body.description == "" else body.description
+    volunteerRequirement.count = volunteerRequirement.count if body.count == "" else body.count
+    volunteerRequirement.duration_days = volunteerRequirement.duration_days if body.duration_days == "" else body.duration_days
     volunteerRequirement.updated_at = datetime.now()
 
     db.commit()

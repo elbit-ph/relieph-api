@@ -39,13 +39,13 @@ class OrganizationAddressDTO(BaseModel):
     coordinates:str
 
 @router.get("/")
-def retrieveOrganizations(db: DB, file_handler:_fileHandler, p: int = 1, c: int = 10):
+async def retrieveOrganizations(db: DB, file_handler:_fileHandler, p: int = 1, c: int = 10):
     # also return images
     orgs:List[Organization] = db.query(Organization).filter(and_(Organization.is_active == True)).limit(c).offset((p-1)*c).all()
     to_return = []
 
     for org in orgs:
-        profile_link = file_handler.get_org_profile(org.id)
+        profile_link = await file_handler.get_org_profile(org.id)
         to_return.append({
             "id" : org.id,
             "owner_id" : org.owner_id,
@@ -53,13 +53,13 @@ def retrieveOrganizations(db: DB, file_handler:_fileHandler, p: int = 1, c: int 
             "description" : org.description,
             "tier" : org.tier,
             "created_at" : org.created_at,
-            "profile_link" : profile_link[0] if profile_link[1] != False else None
+            "profile_link" : profile_link
         })
 
     return to_return
 
 @router.get("/{id}")
-def retrieveOrganization(db:DB, id:int, res: Response, file_handler:_fileHandler):
+async def retrieveOrganization(db:DB, id:int, res: Response, file_handler:_fileHandler):
     org:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False)).first()
 
     if org is None:
@@ -68,7 +68,7 @@ def retrieveOrganization(db:DB, id:int, res: Response, file_handler:_fileHandler
             detail="Organization not found."
         )
     
-    profile_link = file_handler.get_org_profile(id)
+    profile_link = await file_handler.get_org_profile(id)
 
     return {
         "id" : org.id,

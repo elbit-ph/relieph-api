@@ -358,7 +358,7 @@ async def approveReliefEffort(db:DB, id:int, res: Response, relief_email_handler
         org:Organization = db.query(Organization).filter(and_(Organization.id == relief.owner_id)).first()
         foundation:Organization = db.query(Organization).filter(and_(Organization.id == org.sponsor_id)).first()
 
-        if user.level != 5 and (foundation is None or user.user_id != foundation.owner_id):
+        if user.level != 4 and (foundation is None or user.user_id != foundation.owner_id):
             res.status_code = 403
             return {'detail' : 'Not authorized'}
         # get user affliated
