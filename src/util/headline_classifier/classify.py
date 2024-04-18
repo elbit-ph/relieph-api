@@ -22,7 +22,7 @@ def classify_headline(data):
 
     prediction_score = prediction_probabilities[max_prob_index]
     
-    min_prediction_score_threshold = 0.95
+    min_prediction_score_threshold = 0.92
     
     if prediction_score >= min_prediction_score_threshold:
         return {"prediction": predicted_category}

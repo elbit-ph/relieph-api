@@ -22,5 +22,5 @@ scheduler = BackgroundScheduler(
     timezone=utc
 )
 
-scheduler.add_job(start_model, 'interval', seconds=60)
+scheduler.add_job(start_model, 'interval', seconds=3600)
 
