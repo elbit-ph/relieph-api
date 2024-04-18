@@ -272,16 +272,4 @@ class SponsorshipRequest(Base):
     foundation = relationship('Organization', primaryjoin='SponsorshipRequest.foundation_id == Organization.id')
     organization = relationship('Organization', primaryjoin='SponsorshipRequest.organization_id == Organization.id')
 
-class Headline(Base):
-    __tablename__ = 'headlines'
-
-    id = Column(Integer, primary_key=True, server_default=text("nextval('volunteers_id_seq'::regclass)"))
-    title = Column(String(255), nullable=False)
-    link = Column(Text, nullable=False)
-    disaster_type = Column(String(80), nullable=False)
-    posted_datetime = Column(DateTime(True), nullable=False)
-
-    created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
-    updated_at = Column(DateTime(True))
-
 Base.metadata.create_all(engine)
