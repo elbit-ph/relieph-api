@@ -1,9 +1,10 @@
 async-timeout==4.0.3
 asyncpg==0.29.0
+apscheduler==3.10.4
 fastapi==0.110.1
 importlib-metadata==7.0.1
 llvmlite==0.42.0
-minio==7.2.5
+pip install minio==7.2.5
 Pillow==10.3.0
 pydantic==1.10.12
 python-dotenv==1.0.1
