@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from ..db.models import Headline
 from ..db.database import Session
 
-def retrieveHeadlineData(db):
+def retrieveHeadlineData(db, p: int = 1, c: int = 10):
     current_datetime = datetime.now()
     two_weeks = current_datetime + timedelta(weeks=2)
 
@@ -13,7 +13,7 @@ def retrieveHeadlineData(db):
             and_(
                 Headline.disaster_type != 'non-disaster',
                 Headline.posted_datetime < two_weeks
-            )).all())    
+            )).limit(c).offset((p-1)*c).all())    
 
     return headline_data
 

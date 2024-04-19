@@ -7,8 +7,8 @@ from .save import start_model
 jobstore = MemoryJobStore()
 
 executors = {
-    'default': ThreadPoolExecutor(20),
-    'processpool': ProcessPoolExecutor(5)
+    'default': ThreadPoolExecutor(5),
+    'processpool': ProcessPoolExecutor(3)
 }
 job_defaults = {
     'coalesce': False,

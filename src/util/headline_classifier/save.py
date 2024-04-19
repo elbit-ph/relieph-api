@@ -1,16 +1,19 @@
+import logging
 from sqlalchemy import and_
 from services.db.models import Headline
 from services.db.database import Session
 from .scrape_headline import classified_headlines
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def add_data(db, headline_data):
     for data in headline_data:
-        
         existing_headline = db.query(Headline).filter(
             and_(Headline.link == data['link'])).first()    
-
+        
         if existing_headline:
-            return
+            continue
 
         headline = Headline(
             title=data['title'],
