@@ -1,65 +1,134 @@
 from typing import Annotated, List
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
-from dependencies import get_db_session, get_logger, get_current_user, get_organization_email_handler
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Body, Form
+from dependencies import get_logger, get_current_user, get_organization_email_handler, get_file_handler
 from services.db.database import Session
-from services.db.models import Organization, User, Address, SponsorshipRequest
+from services.db.models import Organization, SponsorshipRequest, User, ReliefEffort
 from services.log.log_handler import LoggingService
 from services.email.organization_email_handler import OrganizationEmailHandler
+from services.storage.file_handler import FileHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
-from pydantic import BaseModel, Json
+from pydantic import BaseModel
 from datetime import datetime
 from sqlalchemy import and_
-import json
-from types import SimpleNamespace
 
 router = APIRouter(
     prefix="/foundations",
     tags=["foundations"],
-    dependencies=[Depends(get_db_session), Depends(get_logger)]
+    dependencies=[Depends(get_logger)]
 )
 
-DB = Annotated[Session, Depends(get_db_session)]
+# [Session, Depends(get_db_session)]
+_fileHandler = Annotated[FileHandler, Depends(get_file_handler)]
 Logger = Annotated[LoggingService, Depends(get_logger)]
+db = Session()
 
-
-# NOTE: foundations are organizations with tier level 4
+# NOTE: foundations are organizations with tier level 2
 
 @router.get("/")
-def retrieveFoundations(db: DB, p: int = 1, c: int = 10):
-    return db.query(Organization).filter(and_(Organization.is_active, Organization.tier == 4)).limit(c).offset((p-1)*c).all()
+async def retrieve_foundations(file_handler:_fileHandler, p: int = 1, c: int = 10):
+    """
+    Retrieve foundations.
+    """
+
+    # Get list of active organizations from database
+    orgs: List[Organization] = db.query(Organization).filter(and_(Organization.is_active == True, Organization.tier == 2)).limit(c).offset((p-1)*c).all()
+
+    # Initialize empty list to store retrieved data
+    to_return = []
+
+    # Extract necessary data and generate profile links for each organization
+    for org in orgs:
+        profile_link = await file_handler.get_org_profile(org.id)
+        to_return.append({
+            "id": org.id,
+            "owner_id": org.owner_id,
+            "name": org.name,
+            "description": org.description,
+            "tier": org.tier,
+            "created_at": org.created_at,
+            "profile_link": profile_link
+        })
+
+    return to_return
 
 @router.get("/{id}")
-def retrieveFoundation(db:DB, id:int):
-    foundation:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False, Organization.tier == 4)).first()
+async def retrieve_foundation(id:int, file_handler:_fileHandler):
+    """
+    Retrieve foundation with `id`
+    """
+    
+    # Retrieve foundation from database
+    foundation: Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.tier == 2, Organization.is_deleted == False)).first()
 
+    # Check if organization exists, raise 404 Not Found if not
     if foundation is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Foundation not found."
+            detail="Organization not found."
         )
-    return foundation
 
+    # Get organization profile picture link
+    profile_link = await file_handler.get_org_profile(id)
 
-@router.get("/{id}/sponsored")
-def retrieveSponsored(db:DB, id:int):
-    sponsored_orgs :List[Organization] = db.query(Organization).filter(and_(Organization.sponsor_id == id, Organization.is_deleted == True)).all()
-    return sponsored_orgs
-# make foundation creation as an application
+    # Return organization details as a dictionary
+    return {
+        "id": foundation.id,
+        "owner_id": foundation.owner_id,
+        "name": foundation.name,
+        "description": foundation.description,
+        "tier": foundation.tier,
+        "is_active": foundation.is_active,  # Include "is_active" field
+        "created_at": foundation.created_at,
+        "profile_link": profile_link
+    }
+
+# clarify if organizations can be accredited
+# @router.get("/{foundation_id}/sponsored/organizations")
+# def retrieve_sponsored_organizations(foundation_id:int, p: int = 1, c: int = 10):
+#     """
+#     Retrieve sponsored organizations of a foundation
+#     """
+#     sponsored_orgs :List[Organization] = db.query(Organization).filter(and_(Organization.sponsor_id == foundation_id, Organization.is_deleted == True)).limit(c).offset((p-1)*c).all()
+#     return sponsored_orgs
+
+@router.get("/{foundation_id}/sponsored/users")
+def retrieve_sponsored_users(foundation_id:int, p: int = 1, c: int = 10):
+    """
+    Retrieve sponsored users of a foundation
+    """
+    sponsored_users : List[User] = db.query(User).filter(and_(User.sponsor_id == foundation_id, Organization.is_deleted == True)).limit(c).offset((p-1)*c).all()
+    return sponsored_users
 
 @router.get("/{id}/sponsored/requests")
-def retrieveSponsorshipRequest(db:DB, id:int, res:Response, user: AuthDetails = Depends(get_current_user)):
+def retrieve_sponsorship_request(id:int, res:Response, f:str = None, user: AuthDetails = Depends(get_current_user)):
+    """
+    Retrieve sponsorship request
+    """
+    authorize(user, 3,3)
+
     foundation:Organization = db.query(Organization).filter(and_(Organization.tier == 4, Organization.id == id)).first()
 
+    # check if foundation exists
     if foundation is None:
         res.status_code = 404
         return {'detail' : 'Foundation not found.'}
 
+    # check if user is authorize to act on behalf of foundation 
     if user.user_id != foundation.owner_id:
         res.status_code = 403
         return {'detail' : 'Insufficient authorization to view sponsorship requests.'}
 
-    reqs:List[SponsorshipRequest] = db.query(SponsorshipRequest).filter(and_(SponsorshipRequest.foundation_id == id, SponsorshipRequest.is_deleted == False, SponsorshipRequest.status == 'PENDING')).all()
+    reqs = List[SponsorshipRequest]
+
+    # get requests according to `f` owner type
+    match f:
+        case 'users':
+            reqs = db.query(SponsorshipRequest).filter(and_(SponsorshipRequest.foundation_id == id, SponsorshipRequest.owner_type == 'USER', SponsorshipRequest.is_deleted == False, SponsorshipRequest.status == 'PENDING')).all()
+        case 'organizations':
+            reqs = db.query(SponsorshipRequest).filter(and_(SponsorshipRequest.foundation_id == id, SponsorshipRequest.owner_type == 'ORGANIZATION',SponsorshipRequest.is_deleted == False, SponsorshipRequest.status == 'PENDING')).all()
+        case _:
+            reqs = db.query(SponsorshipRequest).filter(and_(SponsorshipRequest.foundation_id == id, SponsorshipRequest.is_deleted == False, SponsorshipRequest.status == 'PENDING')).all()
 
     return reqs
 
@@ -68,40 +137,39 @@ class sponsorshipRequestDTO(BaseModel):
     sponsorship_request_id: int
     action: str
 
-@router.patch("/{id}")
-def resolveSponsorshipRequest(db: DB, id:int, body:sponsorshipRequestDTO, res:Response, user: AuthDetails = Depends(get_current_user)):
-    authorize(user,3,5)
-    foundation:Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.tier == 4, Organization.is_deleted == False)).first()
-    org: Organization = db.query(Organization).filter(and_(Organization.id == body.owner_id, Organization.is_deleted == False)).first()
-    sponsorship_request = db.query(SponsorshipRequest).filter(and_(SponsorshipRequest.id == body.sponsorship_request_id)).first()
+@router.patch("/{id}/user")
+async def resolve_user_sponsorship_request(id:int, body:sponsorshipRequestDTO, res:Response, user: AuthDetails = Depends(get_current_user)):
+    """
+    resolves user sponsorship request. Updates user's sponsor id on success.
+    """
+    # check user authorization
+    authorize(user, 3,3)
 
+    sponsorship_request:SponsorshipRequest = db.query(SponsorshipRequest).filter(and_(SponsorshipRequest.status == 'PENDING', SponsorshipRequest.owner_id == user.user_id, SponsorshipRequest.owner_type == 'USER')).first()
+
+    # check if relief effort exists
     if sponsorship_request is None:
         res.status_code = 404
-        return {'detail' : 'Sponsorship request not found.'}
+        return {'detail' : 'RSponsorship request does not exists'}
 
-    # check if user is authorized to act on behalf of foundation
-    # depends on owner type
-    if foundation.owner_id != user.user_id:
-        res.status_code = 403
-        return {'detail' : 'Insufficient authorization to act behalf of foundation.'}
+    _user:User = db.query(User).filter(User.id == user.user_id).first()
 
-    # check if action is valid (either approve or reject)
-    if body.action not in ('approve', 'reject'):
-        res.status_code = 406
-        return {'detail' : 'Invalid action.'}
+    match body.action:
+        case 'approve':
+            user.sponsor_id = sponsorship_request.foundation_id
+            _user.updated_at = datetime.now()
 
-    if body.action == 'approve':
-        org.sponsor_id = id
-        org.updated_at = datetime.now()
-        sponsorship_request.status = 'APPROVED'
-    else:
-        sponsorship_request.status = 'REJECTED'
-    sponsorship_request.updated_at = datetime.now()
+            sponsorship_request.status = 'APPROVED'
+            sponsorship_request.updated_at = datetime.now()
 
-    db.commit()
-    # send email notification here.
-
-    org_owner:User = db.query(User).filter(org.owner_id == User.id).first()
-
-
-    return {'detail' : f'Organization sponsorship has been successfully {body.action}.'}
+            db.commit()
+        case 'reject':
+            sponsorship_request.status = 'REJECTED'
+            sponsorship_request.updated_at = datetime.now()
+            db.commit()
+            return {'detail' : 'Rejected sponsorship request'}
+        case _:
+            res.status_code = 406
+            return {'detail' : 'Invalid action.'}
+    
+    return {'detail': 'Successfully resolved user sponsorship request.'}

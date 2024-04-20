@@ -2,7 +2,7 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
 from dependencies import get_logger, get_current_user, get_code_email_handler, get_file_handler
 from services.db.database import Session
-from services.db.models import User, Address, UserUpgradeRequest, VerificationCode
+from services.db.models import User, Address, UserUpgradeRequest, VerificationCode, SponsorshipRequest, Organization
 from services.log.log_handler import LoggingService
 from services.email.code_email_handler import CodeEmailHandler
 from services.storage.file_handler import FileHandler
@@ -490,3 +490,46 @@ async def delete_user(id:int, res: Response, user:AuthDetails = Depends(get_curr
     return {
         "detail" : "Successfully deleted user."
     }
+
+class UserSponsorshipRequestDTO(BaseModel):
+    foundation_id : int
+    message: str
+
+@router.post("/{id}/sponsorship")
+async def apply_for_sponsorship(body:UserSponsorshipRequestDTO, res:Response, user:AuthDetails = Depends(get_current_user)):
+    """
+    Allows user to apply for sponsorship in foundation
+    """
+
+    # check for user authorization
+    authorize(user, 2, 2)
+
+    request = SponsorshipRequest()
+
+    foundation = db.query(Organization).filter(and_(Organization.id == body.foundation_id, Organization.tier == 2)).first()
+
+    # check if foundation exists
+    if foundation is None:
+        res.status_code = 404
+        return {'detail': 'Foundation not found'}
+    
+    request = db.query(SponsorshipRequest).filter(and_(SponsorshipRequest.status == 'PENDING', SponsorshipRequest.owner_id == user.user, SponsorshipRequest.owner_type == 'USER')).first()
+
+    # check if there's an existing request for user
+    if request is not None:
+        res.status_code = 400
+        return {'detail': 'Existing request'}
+    
+    # create new sponsorship request
+    request = SponsorshipRequest()
+
+    request.foundation_id = body.foundation_id
+    request.owner_id = user.user_id
+    request.owner_type = 'USER'
+    request.message = body.message
+    request.status = 'PENDING'
+
+    db.add(request)
+    db.commit()
+
+    return {'detail' : 'Successfully sent request for sponsorship'}

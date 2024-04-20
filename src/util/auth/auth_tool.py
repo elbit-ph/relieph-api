@@ -16,21 +16,14 @@ def authorize(user: AuthDetails, min_level: int = 0, max_level: int = 5):
             detail="No access for user type."
         )
 
-def is_user_organizer(user: AuthDetails, org_id:int, db):
-    # get organization
-    org:Organization = db.query(Organization).filter(and_(Organization.id == org_id, Organization.is_active == True)).first()
-    
-    # check if org exists
-    if org is None:
-        return False
-    
+def is_user_organizer(user: AuthDetails, owner_id):
     # check if user can act on behalf of org
-    if org.owner_id != user.user_id:
+    if owner_id != user.user_id:
         return False
 
     return True
 
-def is_authorized(owner_id:int, owner_type:str, user: AuthDetails, db):
+def is_authorized(owner_id:int, owner_type:str, user: AuthDetails):
     # admins are automatically authorized
     if user.level == 4:
         return True
@@ -40,7 +33,7 @@ def is_authorized(owner_id:int, owner_type:str, user: AuthDetails, db):
             if user.user_id != owner_id:
                 return False
         case 'ORGANIZATION':
-            if is_user_organizer(user, owner_id, db) == False:
+            if is_user_organizer(user, owner_id) == False:
                 return False
         case _:
             return False
