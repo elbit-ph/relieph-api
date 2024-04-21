@@ -16,6 +16,7 @@ from services.email.code_email_handler import CodeEmailHandler
 from services.log.log_handler import LoggingService
 from services.storage.file_handler import FileHandler
 from models.auth_details import AuthDetails
+import jwt
 
 # dependencies go here
 
@@ -61,7 +62,7 @@ async def get_current_user(token: str = Depends(reuseable_oauth)) -> AuthDetails
                 detail="Token expired",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-    except(jwt.JWTError, ValidationError):
+    except(jwt.PyJWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",

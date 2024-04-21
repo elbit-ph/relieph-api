@@ -10,7 +10,7 @@ load_dotenv()
 
 class FileHandler():
     def __init__(self):
-        self.allowed_directories = ('users', 'organizations', 'relief-efforts', 'updates')
+        self.allowed_directories = ('users', 'organizations', 'relief-efforts', 'updates', 'valid_ids')
         self.allowed_img_suffix = ('png', 'jpg')
         self.bucket_name = 'relieph' # place in .env later
         self.handler:Minio = Minio(endpoint=os.environ.get('MINIO_URI'),
@@ -105,17 +105,13 @@ class FileHandler():
             for file in files:
                 suffix = file.filename.split('.')[-1]
                 file.filename = f'{count}.{suffix}'
-                to_upload.append(SnowballObject(
+                self.handler.put_object(
+                    bucket_name=self.bucket_name,
                     object_name=f'{to}/{id}/{file.filename}',
-                    filename=file.filename,
                     data=file.file,
                     length=file.file.__sizeof__()
-                ))
+                )
                 count += 1
-
-            self.handler.upload_snowball_objects(
-                self.bucket_name,
-                to_upload)
 
         except:
             return ('UploadError', False)
@@ -194,13 +190,13 @@ class FileHandler():
         return False
     
     async def get_user_profile(self, id:int):
-        resu = self.retrieve_file(id, 'users')
+        resu = await self.retrieve_file(id, 'users')
         if resu[1] == False:
             return self.handler.presigned_get_object(self.bucket_name, 'users/default_profile.png')
         return resu[0]
     
     async def get_org_profile(self, id:int):
-        resu = self.retrieve_file(id, 'organizations')
+        resu = await self.retrieve_file(id, 'organizations')
         if resu[1] == False:
             return self.handler.presigned_get_object(self.bucket_name, 'organizations/default.png')
         return resu[0]
