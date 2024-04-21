@@ -1,31 +1,33 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body
-from dependencies import get_db_session, get_logger, get_current_user
+from fastapi import APIRouter, Depends, HTTPException, status, Response
+from dependencies import get_logger, get_current_user
 from services.db.database import Session
-from services.db.models import Volunteer, VolunteerRequirement, ReliefEffort, User, Address
-from services.log.log_handler import LoggingService
+from services.db.models import Volunteer, VolunteerRequirement, ReliefEffort, User
+from services.email.volunteer_email_handler import VolunteerEmailHandler
 from models.auth_details import AuthDetails
-from util.auth.auth_tool import authorize
+from util.auth.auth_tool import authorize, is_authorized
 from sqlalchemy import and_
-from util.auth.jwt_util import (
-    get_hashed_password
-)
 from pydantic import BaseModel
 from datetime import datetime
 
 router = APIRouter(
     prefix="/volunteers",
     tags=["volunteers"],
-    dependencies=[Depends(get_db_session), Depends(get_logger)]
+    dependencies=[Depends(get_logger)]
 )
 
-DB = Annotated[Session, Depends(get_db_session)]
-Logger = Annotated[LoggingService, Depends(get_logger)]
+db = Session()
+volunteer_email_handler = VolunteerEmailHandler()
 
 @router.get("/{id}")
-def retrieveVolunteers(db:DB, id:int, p: int = 1, c: int = 10):
+def retrieve_volunteers(id:int, p: int = 1, c: int = 10):
+    """
+    Retrieve list of volunteers for relief `id`
+    """
+    # get relief effort
     reliefEffort:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == id, ReliefEffort.is_deleted == False)).first()
 
+    # check if relief effort exists
     if reliefEffort is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -40,38 +42,52 @@ class VolunteerRequirementsDTO(BaseModel):
     count:int
     duration_days:int
 
-@router.post("/{id}")
-def createVolunteerRequirements(body:VolunteerRequirementsDTO, db:DB, res:Response, id: int):
+# temporarily disable this until notice from frontend team
+# @router.post("/{id}")
+# def create_volunteer_requirements(body:VolunteerRequirementsDTO, res:Response, id: int):
+#     """
+#     Create volunteer requirements
+#     """
+
+#     volunteerRequirement:VolunteerRequirement = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.name == body.name, VolunteerRequirement.is_deleted == False)).first()
+
+#     # check if volunteer requirement exists already
+#     if volunteerRequirement is not None:
+#         res.status_code = 400
+#         return {"detail": "Name already exists"}
     
-    volunteerRequirement:VolunteerRequirement = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.name == body.name, VolunteerRequirement.is_deleted == False)).first()
+#     volunteerRequirement = VolunteerRequirement()
 
-    if volunteerRequirement is not None:
-        res.status_code = 400
-        return {"detail": "Name already exists"}
-    
-    volunteerRequirement = VolunteerRequirement()
+#     volunteerRequirement.relief_id = id
+#     volunteerRequirement.name = body.name
+#     volunteerRequirement.description = body.description
+#     volunteerRequirement.count = body.count
+#     volunteerRequirement.duration_days = body.duration_days
 
-    volunteerRequirement.relief_id = id
-    volunteerRequirement.name = body.name
-    volunteerRequirement.description = body.description
-    volunteerRequirement.count = body.count
-    volunteerRequirement.duration_days = body.duration_days
+#     db.add(volunteerRequirement)
+#     db.commit()
 
-    db.add(volunteerRequirement)
-    db.commit()
-
-    volunteerRequirement = db.query(VolunteerRequirement).filter(VolunteerRequirement.name == body.name).first()
-
-    return {"details": "Organization created.",
-            "volunteer_requirements_id": volunteerRequirement.id}
+#     return {"details": "Organization created."}
 
 @router.patch("/{id}")
-def editVolunteerRequirements(body:VolunteerRequirementsDTO, db:DB, res:Response, id: int):
-    volunteerRequirement:VolunteerRequirement = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.name == body.name, VolunteerRequirement.is_deleted == False)).first()
+def edit_volunteer_requirements(body:VolunteerRequirementsDTO, res:Response, id: int, user:AuthDetails = Depends(get_current_user)):
+    """
+    Edit volunteer requirement with `id`
+    """
 
+    volunteerRequirement:VolunteerRequirement = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.id == id, VolunteerRequirement.is_deleted == False)).first()
+
+    # check if volunteer requirement exists
     if volunteerRequirement is None:
         res.status_code = 404
         return {"detail": "Volunteer requirements non-existent"}
+    
+    # check for authorization
+    relief:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == volunteerRequirement.relief_id)).first()
+
+    if is_authorized(relief.owner_id, relief.owner_type, user) == False:
+        res.status_code = 403
+        return {'detail' : 'Not authorized to access this resource.'}
     
     volunteerRequirement.name = volunteerRequirement.name if body.name == "" else body.name
     volunteerRequirement.description = volunteerRequirement.ndescriptioname if body.description == "" else body.description
@@ -84,15 +100,20 @@ def editVolunteerRequirements(body:VolunteerRequirementsDTO, db:DB, res:Response
     return {"detail": "Volunteer requirements successfully updated."}
 
 @router.post("/{id}/apply")
-def applyAsVolunteer(id:int, res:Response, db:DB, user:AuthDetails = Depends(get_current_user)):
+def apply_as_volunteer(id:int, res:Response, user:AuthDetails = Depends(get_current_user)):
+    """
+    Apply as volunteer to a relief, specifically for volunteer requirement `id`
+    """
     volunteerRequirement:VolunteerRequirement = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.relief_id == id, VolunteerRequirement.is_deleted == False)).first()
     
+    # check if volunteer requirement exists
     if volunteerRequirement is None:
         res.status_code = 404
-        return {"detail": "Relief effort not found."}
+        return {"detail": "Volunteer requirement not found."}
     
     volunteer:Volunteer = db.query(Volunteer).filter(Volunteer.volunteer_id == user.user_id).first()
 
+    # check if volunteer already exists
     if volunteer is not None:
         res.status_code = 400
         return {"detail": "Is already a volunteer."}
@@ -106,71 +127,108 @@ def applyAsVolunteer(id:int, res:Response, db:DB, user:AuthDetails = Depends(get
     db.add(volunteer)
     db.commit()
 
-    volunteer = db.query(Volunteer).filter(Volunteer.volunteer_id == user.user_id).first()
-
-    return {"details": "Successfully applied as a volunteer.",
-            "volunteer_id" : volunteer.id}
+    return {"details": "Successfully applied as a volunteer."}
 
 @router.patch("/{id}/approve/{user_id}")
-def approveApplication (id:int, user_id:int, db:DB, res:Response):
+async def approve_application (id:int, user_id:int, res:Response, user : AuthDetails = Depends(get_current_user)):
+    """
+    Approve volunteer application
+    """
+
     volunteerRequirement:VolunteerRequirement = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.relief_id == id, VolunteerRequirement.is_deleted == False)).first()
 
+    # check if volunteer requirement exists
     if volunteerRequirement is None:
         res.status_code = 404
         return {"detail": "Relief effort not found."}
     
     volunteer:Volunteer = db.query(Volunteer).filter(Volunteer.volunteer_id == user_id).first()
 
+    # check if volunteer exists
     if volunteer is None:
         res.status_code = 404
         return {"detail": "User not found."}
+    
+    relief:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == volunteerRequirement.relief_id)).first()
+    # check for authorization
+    if is_authorized(relief.owner_id, relief.owner_type, user) == False:
+        res.status_code = 403
+        return {'detail' : 'Not authorized to access this resource.'}
     
     volunteer.status = 'APPROVED'
 
     db.commit()
-    #missing feature - send notification through email
+    
+    _user:User = db.query(User).filter(and_(User.id == volunteer.volunteer_id)).first()
+    await volunteer_email_handler.send_volunteer_acceptance_notice(_user.first_name, _user.email, relief.name)
 
     return {"detail": "Volunteer approved."}
 
-@router.patch("/{id}/approve/{user_id}")
-def rejectApplication (id:int, user_id:int, db:DB, res:Response):
+@router.patch("/{id}/reject/{user_id}")
+async def reject_application (id:int, user_id:int, res:Response, user:AuthDetails = Depends(get_current_user)):
+    """
+    Reject volunteer application
+    """
+
     volunteerRequirement:VolunteerRequirement = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.relief_id == id, VolunteerRequirement.is_deleted == False)).first()
 
+    # check if volunteer requirement exists
     if volunteerRequirement is None:
         res.status_code = 404
         return {"detail": "Relief effort not found."}
     
     volunteer:Volunteer = db.query(Volunteer).filter(Volunteer.volunteer_id == user_id).first()
-
+    
+    # check if volunteer exists
     if volunteer is None:
         res.status_code = 404
         return {"detail": "User not found."}
     
+    # check authorization
+    relief:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == volunteerRequirement.relief_id)).first()
+    # check for authorization
+    if is_authorized(relief.owner_id, relief.owner_type, user) == False:
+        res.status_code = 403
+        return {'detail' : 'Not authorized to access this resource.'}
+
     volunteer.status = 'REJECTED'
 
     db.commit()
-    #missing feature - send notification through email
+    
+    _user:User = db.query(User).filter(and_(User.id == volunteer.volunteer_id)).first()
+    await volunteer_email_handler.send_volunteer_rejection_notice(_user.first_name, _user.email, relief.name)
 
     return {"detail": "Volunteer rejected."}
 
 @router.delete("/{id}/remove/{user_id}")
-def removeApplication (id:int, user_id:int, db:DB, res:Response):
+def remove_application (id:int, user_id:int, res:Response, user: AuthDetails = Depends(get_current_user)):
+    """
+    Remove application
+    """
+    authorize(user, 1,4)
+
     volunteerRequirement:VolunteerRequirement = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.relief_id == id, VolunteerRequirement.is_deleted == False)).first()
 
+    # check if volunteer requirement exists
     if volunteerRequirement is None:
         res.status_code = 404
         return {"detail": "Relief effort not found."}
     
     volunteer:Volunteer = db.query(Volunteer).filter(Volunteer.volunteer_id == user_id).first()
 
+    # check if volunteer exists
     if volunteer is None:
         res.status_code = 404
         return {"detail": "User not found."}
     
+    if volunteer.volunteer_id != user.user_id:
+        res.status_code = 403
+        return {'detail' : 'Unauthorized to remove application'}
+    
+    # soft delete volunteer
     volunteer.is_deleted = True
 
     db.commit()
-    #missing feature - send notification through email
 
     return {"detail": "Volunteer removed."}
 

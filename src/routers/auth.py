@@ -1,11 +1,7 @@
-from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
-from dependencies import get_db_session, get_logger, get_current_user, get_email_handler, get_code_email_handler
 from services.db.database import Session
 from services.db.models import User, VerificationCode
-from services.log.log_handler import LoggingService
-from services.email.email_handler import EmailHandler
 from services.email.code_email_handler import CodeEmailHandler
 from util.auth.jwt_util import (
     get_hashed_password,
@@ -14,7 +10,6 @@ from util.auth.jwt_util import (
     create_refresh_token
 )
 from util.code_generator import generate_code
-from util.auth.auth_tool import authorize
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from pytz import UTC as utc
@@ -28,16 +23,15 @@ load_dotenv()
 router = APIRouter(
     prefix="/auth",
     tags=["auth"],
-    dependencies=[Depends(get_db_session), Depends(get_logger)]
+    dependencies=[]
 )
 
 class ForgotPasswordDTO(BaseModel):
     email:str
 
-DB = Annotated[Session, Depends(get_db_session)]
-Logger = Annotated[LoggingService, Depends(get_logger)]
-Email_Handler = Annotated[EmailHandler, Depends(get_email_handler)]
-code_email_handler = Annotated[CodeEmailHandler, Depends(get_code_email_handler)]
+code_email_handler = CodeEmailHandler()
+db = Session()
+
 
 # user levels
 # 0/None - Guest/Anonymous
@@ -47,7 +41,10 @@ code_email_handler = Annotated[CodeEmailHandler, Depends(get_code_email_handler)
 # 4 - Admin/Moderator
 
 @router.post('/login', summary="Create access and refresh tokens for user")
-async def login(db:DB, form_data: OAuth2PasswordRequestForm = Depends()):
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """
+    Signs user in. Returns JWT token.
+    """
     user:User = db.query(User).filter(User.username==form_data.username).first()
     if user is None:
         raise HTTPException(
@@ -68,7 +65,10 @@ async def login(db:DB, form_data: OAuth2PasswordRequestForm = Depends()):
     }
 
 @router.post("/forgot-password", summary="Creates password reset request and sends verification code to user's email.")
-async def forgot_password(email: ForgotPasswordDTO, db:DB, emailer:code_email_handler):
+async def forgot_password(email: ForgotPasswordDTO, code_email_handler:CodeEmailHandler):
+    """
+    Requests for verification code for password reset
+    """
     user:User = db.query(User).filter(User.email == email.email).first()
     if user is None:
         raise HTTPException(
@@ -85,7 +85,7 @@ async def forgot_password(email: ForgotPasswordDTO, db:DB, emailer:code_email_ha
     db.commit()
 
     # send email
-    resp = await emailer.send_password_reset_code(email.email, f'{user.first_name} {user.last_name}', code)
+    resp = await code_email_handler.send_password_reset_code(email.email, f'{user.first_name} {user.last_name}', code)
 
     return 'Success'
 
@@ -95,16 +95,18 @@ class VerifyCodeModel(BaseModel):
 
 # verify code
 @router.get("/verify-code", summary="Checks if entered code is valid. Returns user id (securely store then use in /reset-password).")
-async def verify_code(body:VerifyCodeModel, db:DB, response:Response):
-    # get code
-    #code_:VerificationCode = db.query(VerificationCode).filter(VerificationCode.code == body.code and VerificationCode.user_id == body.id).first()
+async def verify_code(body:VerifyCodeModel, response:Response):
+    """
+    Verifies code
+    """
     code_:VerificationCode = db.query(VerificationCode).join(User).filter(VerificationCode.code == body.code and User.email == body.email and VerificationCode.user_id == User.id).first()
+    # check if code is right
     if code_ is None:
-        # check if code is right
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid verification code."
         )
+    # check if code is expired
     if code_.expired_at < utc.localize(datetime.utcnow()):
         # expired code
         db.delete(code_)
@@ -124,8 +126,10 @@ class PasswordResetModel(BaseModel):
     confirm_password: str
 
 @router.patch("/reset-password", summary="Resets user's password.")
-async def verify_code(body:PasswordResetModel, db:DB, response:Response):
-    # get code
+async def reset_password(body:PasswordResetModel, response:Response):
+    """
+    Resets password of user
+    """
     code:VerificationCode = db.query(VerificationCode).filter(VerificationCode.user_id == body.id and body.code == VerificationCode.code).first()
     
     # check if code is right
@@ -134,6 +138,7 @@ async def verify_code(body:PasswordResetModel, db:DB, response:Response):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid verification code."
         )
+    # check if code is expired
     if code.expired_at < utc.localize(datetime.utcnow()):
         db.delete(code)
         db.commit()
@@ -141,6 +146,7 @@ async def verify_code(body:PasswordResetModel, db:DB, response:Response):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Expired code."
         )
+    # check if passwords match
     if body.password != body.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -149,32 +155,31 @@ async def verify_code(body:PasswordResetModel, db:DB, response:Response):
 
     user:User = db.query(User).filter(User.id == body.id).first()
     user.password = get_hashed_password(body.password)
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now()
     db.delete(code)
     db.commit()
-    # set to HTTP 202
     response.status_code = status.HTTP_202_ACCEPTED
     return {} # code should be sent again to allow change password functionality
 
-@router.get("/get-authorized")
-def test_authorized(user: User = Depends(get_current_user)):
-    authorize(user, 1, 5)
-    return {"Hello": "World"}
-
-# Google authentication part
+# Google authentication part (below)
 
 GOOGLE_CLIENT_ID =  os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
 
 @router.get("/login/google")
 async def login_google():
+    """
+    Generates Google login link
+    """
     return {
         "url": f"https://accounts.google.com/o/oauth2/auth?response_type=code&client_id={GOOGLE_CLIENT_ID}&redirect_uri={GOOGLE_REDIRECT_URI}&scope=openid%20profile%20email&access_type=offline"
     }
 
 @router.get("/auth/google")
-def auth_google(code: str, prompt:str, db:DB):
-    print(code)
+def auth_google(code: str, prompt:str):
+    """
+    Authenticates user account
+    """
     token_url = "https://accounts.google.com/o/oauth2/token"
     data = {
         "code": code,

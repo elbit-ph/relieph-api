@@ -261,15 +261,16 @@ class SponsorshipRequest(Base):
     __tablename__ = 'sponsorship_requests'
 
     id = Column(Integer, primary_key=True, server_default=text("nextval('sponsorship_requests_id_seq'::regclass)"))
-    organization_id = Column(ForeignKey('organizations.id'), nullable=False)
+    owner_id = Column(ForeignKey('organizations.id'), nullable=False)
     foundation_id = Column(ForeignKey('organizations.id'), nullable=False)
     message = Column(Text, nullable=False)
     status = Column(String(100))
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
+    owner_type = Column(String(30), nullable=False)
 
     foundation = relationship('Organization', primaryjoin='SponsorshipRequest.foundation_id == Organization.id')
-    organization = relationship('Organization', primaryjoin='SponsorshipRequest.organization_id == Organization.id')
+    owner = relationship('Organization', primaryjoin='SponsorshipRequest.owner_id == Organization.id')
 
 Base.metadata.create_all(engine)

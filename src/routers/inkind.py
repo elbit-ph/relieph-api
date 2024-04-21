@@ -1,24 +1,21 @@
 from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel
-from dependencies import get_db_session, get_logger, get_current_user
+from dependencies import get_current_user
 from services.db.database import Session
 from services.db.models import Organization, InkindDonation, InkindDonationRequirement, ReliefEffort
-from dependencies import get_db_session
 from sqlalchemy import and_
-from services.log.log_handler import LoggingService
 from models.auth_details import AuthDetails
-from util.auth.auth_tool import authorize
+from util.auth.auth_tool import authorize, is_authorized
 from datetime import date, datetime
 
 router = APIRouter(
     prefix="/inkind",
     tags=["inkind"],
-    dependencies=[Depends(get_db_session), Depends(get_logger)]
+    dependencies=[]
 )
 
-DB = Annotated[Session, Depends(get_db_session)]
-Logger = Annotated[LoggingService, Depends(get_logger)]
+db = Session()
 
 class InKind(BaseModel):
     name: str
@@ -29,41 +26,18 @@ class Pledge(BaseModel):
     requirement_id: int
     amount: int
 
-# ===============================================
+@router.get("/donations/{relief_id}")
+async def get_inkind_donations(relief_id: int, res: Response, p: int = 1, c: int = 10, status:str = "all", user:AuthDetails = Depends(get_current_user)): 
+    """
+    Get list of inkind donations for relief `relief_id`
+    """
 
-# Prototyped auth checker for foundation
-# implement this for ALL routers later on
-def is_user_organizer(user: AuthDetails, org_id:int, db:DB):
-    org:Organization = db.query(Organization).filter(and_(Organization.id == org_id, Organization.is_active == True)).first()
-    
-    if org is None:
-        return False
-
-    return True
-
-def is_authorized(owner_id:int, owner_type:str, user: AuthDetails, db:DB):
-    if user.level == 4:
-        return True
-    match owner_type:
-        case 'USER':
-            if user.user_id != owner_id:
-                return False
-        case 'ORGANIZATION':
-            if is_user_organizer(user, owner_id, db) == False:
-                return False
-        case _:
-            return False
-    return True
-
-# ==========================================
-
-#get the list of inkind donations
-@router.get("/{relief_id}")
-async def get_inkind_donations(db:DB, relief_id: int, res: Response, p: int = 1, c: int = 10, status:str = "all", user:AuthDetails = Depends(get_current_user)): 
+    # check for authorization
     authorize(user, 2, 4)
 
     reliefEffort:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == relief_id, ReliefEffort.is_deleted == False)).first()
 
+    # check if relief effort exists
     if reliefEffort is None: 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -81,6 +55,7 @@ async def get_inkind_donations(db:DB, relief_id: int, res: Response, p: int = 1,
 
     status = status.upper()
     
+    # filter base on status
     if status == 'ALL':
         donations = db.query(InkindDonation).filter(retrieve_donation_query).limit(c).offset((p-1)*c).all()
     else:
@@ -88,57 +63,44 @@ async def get_inkind_donations(db:DB, relief_id: int, res: Response, p: int = 1,
 
     return donations
 
-#get specifics of an inkind donation requirement
 @router.get("/requirements/{inkind_requirement_id}")
-async def get_inkind_requirement(db:DB, inkind_requirement_id: int, res: Response):
-    inkind:InkindDonationRequirement = db.query(InkindDonationRequirement).filter(and_(InkindDonationRequirement.id == inkind_requirement_id, InkindDonationRequirement.is_deleted == False)).first()
+async def get_inkind_requirement(inkind_requirement_id: int, res: Response):
+    """
+    get specifics of an inkind donation requirement
+    """
+    inkind_requirement:InkindDonationRequirement = db.query(InkindDonationRequirement).filter(and_(InkindDonationRequirement.id == inkind_requirement_id, InkindDonationRequirement.is_deleted == False)).first()
 
-    if inkind is None:
+    # check if inkind requirement exists
+    if inkind_requirement is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Inkind requirement not found."
         )
     
+    # get count of how many items of `inkind_requirement` are needed currently
     remaining = db.query(InkindDonation).filter(and_(InkindDonation.id == inkind_requirement_id, InkindDonation.status == 'DELIVERED')).all()
 
     return {
-        "name": inkind.name,
-        "description": inkind.description,
-        "count": inkind.count,
+        "name": inkind_requirement.name,
+        "description": inkind_requirement.description,
+        "count": inkind_requirement.count,
         "remaining" : len(remaining)
     }
-
-#adds inkind donation requirement
-# NOTE: temporarily disabled addition of donation requirement until notice from frontend team
-# @router.post("/{relief_id}")
-# async def addinkind(db:DB, relief_id:int, inkind:InKind):
-#     reliefEffort:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == relief_id, ReliefEffort.is_deleted == False)).first()
-
-    
-#     if reliefEffort is None: 
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail="Relief Effort is not found."
-#         )
-    
-#     donation = InkindDonationRequirement(name = inkind.name, description = inkind.description, count = inkind.count)
-#     donation.relief_id = relief_id
-
-#     db.add(donation)
-#     db.commit()
-#     db.refresh(donation)
-#     db.close()
-
-#user pledges donation
 
 class PledgeDTO(BaseModel):
     amount: int
     expiry_date: date
 
-@router.post("/requirements/{inkind_requirement_id}")
-async def pledgedonation(db:DB, inkind_requirement_id:int, body:PledgeDTO, user: AuthDetails = Depends(get_current_user)):
+@router.post("/donations/{inkind_requirement_id}")
+async def pledge_donation(inkind_requirement_id:int, body:PledgeDTO, user: AuthDetails = Depends(get_current_user)):
+    """
+    User pledges their donation of goods.
+    """
+
+    # checks authorization
     authorize(user, 1, 3)
 
+    # check if item expiry is valid
     if body.expiry_date < date.today():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -165,15 +127,18 @@ async def pledgedonation(db:DB, inkind_requirement_id:int, body:PledgeDTO, user:
     db.add(donation)
     db.commit()
 
-    # send notif to organizer
-
     return {'detail' : 'Successfully added pledged donation.'}
 
-#mark as already delivered since it is an instant donation
-@router.post("/{inkind_requirement_id}/instant-donation")
-async def instantdonation(db:DB, inkind_requirement_id:int, body:PledgeDTO, user: AuthDetails = Depends(get_current_user)):
+@router.post("/donations/{inkind_requirement_id}/instant")
+async def create_instant_donation(inkind_requirement_id:int, body:PledgeDTO, res:Response, user: AuthDetails = Depends(get_current_user)):
+    """
+    Create instant donation. Marked as `DELIVERED` automatically.
+    """
+
+    # checks for user authorization
     authorize(user, 2, 3)
     
+    # checks validity of expiry
     if body.expiry_date < date.today():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -182,11 +147,18 @@ async def instantdonation(db:DB, inkind_requirement_id:int, body:PledgeDTO, user
     
     inkind_requirement:InkindDonationRequirement = db.query(InkindDonationRequirement).filter(and_(InkindDonationRequirement.id == inkind_requirement_id, InkindDonationRequirement.is_deleted == False)).first()
     
+    # checks if inkind requirement exists
     if inkind_requirement is None: 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Relief Effort is not found."
         )
+    
+    relief:ReliefEffort = db.query(ReliefEffort).filter(ReliefEffort.id == inkind_requirement.relief_id).first()
+
+    if is_authorized(relief.owner_id, relief.owner_type, user) == False:
+        res.status_code = 403
+        return {'detail' : 'Unauthorized access to this resource.'}
     
     donation: InkindDonation = InkindDonation()
 
@@ -202,13 +174,18 @@ async def instantdonation(db:DB, inkind_requirement_id:int, body:PledgeDTO, user
 
     return {'detail' : 'Successfully added instant donation.'}
 
-#mark as delivered
-@router.patch("/donation/{donation_id}/delivered")
-async def delivereddonation(db:DB, res: Response, donation_id:int, user: AuthDetails = Depends(get_current_user)):
+@router.patch("/donations/{donation_id}/delivered")
+async def mark_donation_as_delivered(res: Response, donation_id:int, user: AuthDetails = Depends(get_current_user)):
+    """
+    Mark pledged donation as delivered
+    """
+
+    # check for authorization
     authorize(user, 2, 3)
 
     inkind:InkindDonation = db.query(InkindDonation).filter(and_(InkindDonation.id == donation_id, InkindDonation.is_deleted == False)).first()
     
+    # check if inkind donation was previously pledged
     if inkind is None:
         raise HTTPException(
             status_code= status.HTTP_404_NOT_FOUND,
@@ -217,7 +194,8 @@ async def delivereddonation(db:DB, res: Response, donation_id:int, user: AuthDet
     
     relief_effort:ReliefEffort = db.query(ReliefEffort).filter(ReliefEffort.id == inkind.relief_id).first()
 
-    if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user, db) == False:
+    # check if user is authorized to mark donation as delivered
+    if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user) == False:
         res.status_code = 403
         return {'detail' : 'Unauthorized to mark donation as delivered'}
     
@@ -230,13 +208,18 @@ async def delivereddonation(db:DB, res: Response, donation_id:int, user: AuthDet
 
     return {'detail' : 'Successfully marked donation as delivered'}
 
-#mark as cancelled
-@router.patch("/donation/{donation_id}/cancelled")
-async def cancel_leddonation(db:DB, res: Response, donation_id:int, user: AuthDetails = Depends(get_current_user)):
-    authorize(user, 2, 4)
+@router.patch("/donations/{donation_id}/cancelled")
+async def mark_donation_as_canceled(res: Response, donation_id:int, user: AuthDetails = Depends(get_current_user)):
+    """
+    Mark previously pledged donation as cancelled
+    """
+
+    # check for authorization
+    authorize(user, 2, 3)
 
     inkind:InkindDonation = db.query(InkindDonation).filter(and_(InkindDonation.id == donation_id, InkindDonation.is_deleted == False)).first()
-    
+
+    # check if inkind donation was previously pledged    
     if inkind is None:
         raise HTTPException(
             status_code= status.HTTP_404_NOT_FOUND,
@@ -245,9 +228,10 @@ async def cancel_leddonation(db:DB, res: Response, donation_id:int, user: AuthDe
     
     relief_effort:ReliefEffort = db.query(ReliefEffort).filter(ReliefEffort.id == inkind.relief_id).first()
 
-    if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user, db) == False:
+    # check if user is authorized to mark donation as cancelled
+    if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user) == False:
         res.status_code = 403
-        return {'detail' : 'Unauthorized to mark donation as delivered'}
+        return {'detail' : 'Unauthorized to mark donation as cancelled'}
     
     inkind.status = "CANCELLED"   
     inkind.updated_at = datetime.now()
