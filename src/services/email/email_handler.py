@@ -13,3 +13,22 @@ class EmailHandler():
             "Accept": "application/json",
             "X-Sib-Sandbox" : "drop"
         }
+        self.sender_email = os.environ("EMAIL")
+    
+    def craft_email_body(self, name:str, email:str, subject:str, htmlContent:str):
+        body = {
+            "sender":{
+            "name":"Elbit",
+            "email":self.sender_email
+        },
+        "to":[
+            {
+                "name": name,
+                "email" : email
+            }
+        ],
+        "subject" : subject,
+        "htmlContent" : htmlContent
+        }
+
+        return body
