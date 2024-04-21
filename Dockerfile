@@ -9,7 +9,6 @@ WORKDIR /app/src
 
 # install packages
 RUN pip install --no-cache-dir --upgrade -r /app/src/requirements.txt
-RUN pip install fastapi uvicorn jwt
 
 # expose port 8000 to be used to received requests
 EXPOSE 8000
