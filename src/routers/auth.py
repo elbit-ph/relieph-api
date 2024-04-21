@@ -1,11 +1,7 @@
-from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
-from dependencies import get_logger, get_email_handler, get_code_email_handler
 from services.db.database import Session
 from services.db.models import User, VerificationCode
-from services.log.log_handler import LoggingService
-from services.email.email_handler import EmailHandler
 from services.email.code_email_handler import CodeEmailHandler
 from util.auth.jwt_util import (
     get_hashed_password,
@@ -27,16 +23,15 @@ load_dotenv()
 router = APIRouter(
     prefix="/auth",
     tags=["auth"],
-    dependencies=[Depends(get_logger)]
+    dependencies=[]
 )
 
 class ForgotPasswordDTO(BaseModel):
     email:str
 
-Logger = Annotated[LoggingService, Depends(get_logger)]
-Email_Handler = Annotated[EmailHandler, Depends(get_email_handler)]
-code_email_handler = Annotated[CodeEmailHandler, Depends(get_code_email_handler)]
+code_email_handler = CodeEmailHandler()
 db = Session()
+
 
 # user levels
 # 0/None - Guest/Anonymous
@@ -70,7 +65,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     }
 
 @router.post("/forgot-password", summary="Creates password reset request and sends verification code to user's email.")
-async def forgot_password(email: ForgotPasswordDTO, emailer:code_email_handler):
+async def forgot_password(email: ForgotPasswordDTO, code_email_handler:CodeEmailHandler):
     """
     Requests for verification code for password reset
     """
@@ -90,7 +85,7 @@ async def forgot_password(email: ForgotPasswordDTO, emailer:code_email_handler):
     db.commit()
 
     # send email
-    resp = await emailer.send_password_reset_code(email.email, f'{user.first_name} {user.last_name}', code)
+    resp = await code_email_handler.send_password_reset_code(email.email, f'{user.first_name} {user.last_name}', code)
 
     return 'Success'
 

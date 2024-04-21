@@ -1,11 +1,10 @@
 from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel
-from dependencies import get_logger, get_current_user
+from dependencies import get_current_user
 from services.db.database import Session
 from services.db.models import Organization, InkindDonation, InkindDonationRequirement, ReliefEffort
 from sqlalchemy import and_
-from services.log.log_handler import LoggingService
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize, is_authorized
 from datetime import date, datetime
@@ -13,10 +12,9 @@ from datetime import date, datetime
 router = APIRouter(
     prefix="/inkind",
     tags=["inkind"],
-    dependencies=[Depends(get_logger)]
+    dependencies=[]
 )
 
-Logger = Annotated[LoggingService, Depends(get_logger)]
 db = Session()
 
 class InKind(BaseModel):
@@ -128,8 +126,6 @@ async def pledge_donation(inkind_requirement_id:int, body:PledgeDTO, user: AuthD
 
     db.add(donation)
     db.commit()
-
-    # send notif to organizer
 
     return {'detail' : 'Successfully added pledged donation.'}
 

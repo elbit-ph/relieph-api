@@ -1,18 +1,16 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Form
-from dependencies import get_db_session, get_logger, get_current_user, get_relief_email_handler, get_file_handler
+from dependencies import get_current_user
 from services.db.database import Session
 from services.db.models import Organization, User, Address, ReliefEffort, ReliefBookmark, ReliefComment, InkindDonationRequirement, InkindDonation, VolunteerRequirement, ReliefUpdate
-from services.log.log_handler import LoggingService
 from services.storage.file_handler import FileHandler
 from services.email.relief_email_handler import ReliefEmailHandler
 from models.auth_details import AuthDetails
-from util.auth.auth_tool import authorize, is_authorized, is_user_organizer
+from util.auth.auth_tool import authorize
 from util.files.image_validator import is_image_valid
 from pydantic import BaseModel
 from datetime import datetime, date
 from sqlalchemy import and_, or_
-from sqlalchemy.sql import func
 from typing import List
 from pydantic import Json
 import json
@@ -21,14 +19,12 @@ from types import SimpleNamespace
 router = APIRouter(
     prefix="/reliefs",
     tags=["reliefs"],
-    dependencies=[Depends(get_db_session), Depends(get_logger)]
+    dependencies=[]
 )
 
-DB = Annotated[Session, Depends(get_db_session)]
-Logger = Annotated[LoggingService, Depends(get_logger)]
-_fileHandler = Annotated[FileHandler, Depends(get_file_handler)]
-ReliefEmail = Annotated[ReliefEmailHandler, Depends(get_relief_email_handler)]
 db = Session()
+file_handler = FileHandler()
+relief_email_handler = ReliefEmailHandler()
 
 class ReliefEffortRetrievalDTO(BaseModel):
     keyword: str = ""
@@ -103,7 +99,7 @@ def retrieve_releief_efforts(body:ReliefEffortRetrievalDTO, p: int = 1, c: int =
     return to_return
 
 @router.get("/{relief_effort_id}")
-async def retrieve_relief_effort(relief_effort_id:int, file_handler:_fileHandler):
+async def retrieve_relief_effort(relief_effort_id:int):
     """
     Returns relief effort identified by `relief_effort_id`
     """
@@ -156,7 +152,7 @@ class CreateReliefEffortDTO(BaseModel):
     sponsor_message: str = None
 
 @router.post("/as-user")
-async def create_relief_effort_as_individual(file_handler:_fileHandler, res: Response, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+async def create_relief_effort_as_individual(res: Response, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
     """
     Creates relief effort as a user.
     """
@@ -251,7 +247,7 @@ async def create_relief_effort_as_individual(file_handler:_fileHandler, res: Res
     return {"detail": "Relief effort successfully created"}
 
 @router.post("/as-organization/{id}")
-async def create_relief_effort_as_organization(file_handler:_fileHandler, res: Response, id: int, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+async def create_relief_effort_as_organization(res: Response, id: int, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
     """
     Create relief effort as an organization.
     """
@@ -365,7 +361,7 @@ async def create_relief_effort_as_organization(file_handler:_fileHandler, res: R
     return {"detail": "Relief effort successfully created"}
 
 @router.patch("/{id}/approve")
-async def approveReliefEffort(id:int, res: Response, relief_email_handler: ReliefEmail, user: AuthDetails = Depends(get_current_user)):
+async def approveReliefEffort(id:int, res: Response, user: AuthDetails = Depends(get_current_user)):
     """
     Approves a relief effort.
     """
@@ -413,7 +409,7 @@ async def approveReliefEffort(id:int, res: Response, relief_email_handler: Relie
     return {"detail": "Relief effort successfully approved"}
 
 @router.patch("/{id}/reject")
-async def rejectReliefEffort(id:int, res: Response, relief_email_handler: ReliefEmail, user: AuthDetails = Depends(get_current_user)):
+async def rejectReliefEffort(id:int, res: Response,user: AuthDetails = Depends(get_current_user)):
     """
     Rejects a relief effort
     """
@@ -462,7 +458,7 @@ async def rejectReliefEffort(id:int, res: Response, relief_email_handler: Relief
     return {"detail": "Relief effort successfully rejected."}
 
 @router.delete("/{id}")
-async def delete_relief_effort(id:int, res: Response, relief_email_handler: ReliefEmail, user: AuthDetails = Depends(get_current_user)):
+async def delete_relief_effort(id:int, res: Response,user: AuthDetails = Depends(get_current_user)):
     """
     Deletes a relief effort.
     """
@@ -651,7 +647,7 @@ def retrieve_updates(id:int, f: str = None):
     return updates
 
 @router.get("/{id}/updates/{update_id}/images")
-async def retrieve_update_images(id:int, res:Response, update_id:int, file_handler:_fileHandler):
+async def retrieve_update_images(id:int, res:Response, update_id:int):
     """
     Retrieve images of update `update_id` of relief `id`
     """
@@ -673,7 +669,7 @@ class CreateUpdateDTO(BaseModel):
     type: str = None
 
 @router.post("/{id}/updates")
-async def create_update(id:int, file_handler:_fileHandler, res:Response, body: Json = Form(), images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
+async def create_update(id:int, res:Response, body: Json = Form(), images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
     """
     Create update for relief `id`
     """

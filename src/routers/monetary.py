@@ -1,9 +1,8 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Body
-from dependencies import get_db_session, get_logger, get_current_user
+from dependencies import get_current_user
 from services.db.database import Session
 from services.db.models import ReliefEffort, Organization, ReceivedMoney, UsedMoney, ReliefPaymentKey, User
-from services.log.log_handler import LoggingService
 from services.payment.payment_handler import PaymentHandler;
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize, is_authorized, is_user_organizer
@@ -11,20 +10,16 @@ from sqlalchemy import and_
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
-from cryptography.fernet import Fernet
 from base64 import urlsafe_b64encode
 
 load_dotenv()
 
 router = APIRouter(
     prefix="/monetary",
-    tags=["monetary"],
-    dependencies=[Depends(get_db_session), Depends(get_logger)]
+    tags=["monetary"]
 )
 
-# DB = Annotated[Session, Depends(get_db_session)]
 db = Session()
-Logger = Annotated[LoggingService, Depends(get_logger)]
 payment_handler = PaymentHandler(os.environ.get("ENCRYPTION"))
 
 class RecievedMoneyDTO(BaseModel):

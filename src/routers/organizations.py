@@ -1,13 +1,13 @@
 from typing import Annotated, List
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response, Body, Form
-from dependencies import get_logger, get_current_user, get_organization_email_handler, get_file_handler
+from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response
+from dependencies import get_current_user
 from services.db.database import Session
 from services.db.models import Organization, User, Address, SponsorshipRequest
 from services.storage.file_handler import FileHandler
 from services.email.organization_email_handler import OrganizationEmailHandler
 from models.auth_details import AuthDetails
-from util.auth.auth_tool import authorize, is_authorized, is_user_organizer
-from pydantic import BaseModel, Json
+from util.auth.auth_tool import authorize, is_user_organizer
+from pydantic import BaseModel
 from datetime import datetime
 from sqlalchemy import and_
 import json
@@ -19,11 +19,9 @@ router = APIRouter(
     dependencies=[]
 )
 
-# _fileHandler = Annotated[FileHandler, Depends(get_file_handler)]
-OrganizationEmailer = Annotated[OrganizationEmailHandler, Depends(get_organization_email_handler)]
-
 db = Session()
 file_handler = FileHandler()
+org_emailer = OrganizationEmailHandler()
 
 # Organization levels
 # 0 - unapproved
@@ -102,7 +100,7 @@ class CreateOrganizationDTO(BaseModel):
     address: OrganizationAddressDTO
 
 @router.post("/")
-async def create_organization(res:Response, profile: UploadFile, organization_email_handler:OrganizationEmailer, body: Json = Form(), user: AuthDetails = Depends(get_current_user)):
+async def create_organization(res:Response, profile: UploadFile, user: AuthDetails = Depends(get_current_user)):
     """
     Creates a new organization, uploads its profile picture, and sends a notification email.
     """
@@ -159,7 +157,7 @@ async def create_organization(res:Response, profile: UploadFile, organization_em
     user:User = db.query(User).filter(User.id == user.user_id).first()
 
     # email user that an organization was creatd.
-    await organization_email_handler.send_organization_creation_notice(user.email, user.first_name, org.name)
+    await org_emailer.send_organization_creation_notice(user.email, user.first_name, org.name)
 
     return {"details": "Organization created."}
 
@@ -251,7 +249,7 @@ def retrieve_organization_profile(id:int, res: Response):
     return profile_link
 
 @router.get("/applications")
-def retrieve_organization_applications(res:Response, organization_email_handler:OrganizationEmailer, p: int = 1, c: int = 10, user: AuthDetails = Depends(get_current_user)):
+def retrieve_organization_applications(res:Response, p: int = 1, c: int = 10, user: AuthDetails = Depends(get_current_user)):
     """
     Retrieves a paginated list of applications from organizations requesting tier upgrade.
     """
@@ -278,7 +276,7 @@ def retrieve_organization_applications(res:Response, organization_email_handler:
     return to_return
 
 @router.patch("/{org_id}/{action}")
-async def resolve_organization_application(org_id:int, action:str, res:Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
+async def resolve_organization_application(org_id:int, action:str, res:Response, user: AuthDetails = Depends(get_current_user)):
     """
     Resolves organization application of `org_id` 
     """
@@ -298,8 +296,14 @@ async def resolve_organization_application(org_id:int, action:str, res:Response,
             org.is_active = True
             if owner.level < 3:
                 owner.level = 3 # signifies an organization owner
+
+            # send email notification
+            await org_emailer.send_approved_notification(owner.email, owner.first_name, org.name)
         case 'reject':
             org.is_deleted = True
+
+            # send email notification
+            await org_emailer.send_rejected_notification(owner.email, owner.first_name, org.name)
         case _:
             res.status_code = 400
             return {'detail' : 'Invalid action'}
@@ -308,12 +312,10 @@ async def resolve_organization_application(org_id:int, action:str, res:Response,
 
     db.commit()
 
-    # send email notification later
-
     return {'detail' : f'Successfully resolved organization with status: {action}'}
 
 @router.delete("/{id}")
-async def deleteOrganization(id:int, res: Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
+async def deleteOrganization(id:int, res: Response, user: AuthDetails = Depends(get_current_user)):
     """
     Deletes an organization.
     """
@@ -340,7 +342,7 @@ async def deleteOrganization(id:int, res: Response, organization_email_handler:O
     user:User = db.query(User).filter(User.id == user.user_id).first()
 
     # send email to owner.
-    await organization_email_handler.send_deletion_notice(user.email, user.first_name, org.name)
+    await org_emailer.send_deletion_notice(user.email,user.first_name, org.name)
 
     return {"detail": "Organization deleted"}
 
@@ -350,7 +352,7 @@ class SponsorshipRequestDTO(BaseModel):
     foundation_id: int
 
 @router.post("/sponsor")
-def apply_for_sponsorship(body: SponsorshipRequestDTO, res: Response, organization_email_handler:OrganizationEmailer, user: AuthDetails = Depends(get_current_user)):
+def apply_for_sponsorship(body: SponsorshipRequestDTO, res: Response, user: AuthDetails = Depends(get_current_user)):
     """
     Creates a sponsorship request for an organization to a foundation.
     """

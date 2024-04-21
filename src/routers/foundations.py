@@ -1,10 +1,10 @@
 from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Body, Form
-from dependencies import get_logger, get_current_user, get_organization_email_handler, get_file_handler
+from dependencies import get_current_user
 from services.db.database import Session
-from services.db.models import Organization, SponsorshipRequest, User, ReliefEffort
-from services.log.log_handler import LoggingService
+from services.db.models import Organization, SponsorshipRequest, User
 from services.email.organization_email_handler import OrganizationEmailHandler
+from services.email.foundation_email_handler import FoundationEmailHandler
 from services.storage.file_handler import FileHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
@@ -15,18 +15,17 @@ from sqlalchemy import and_
 router = APIRouter(
     prefix="/foundations",
     tags=["foundations"],
-    dependencies=[Depends(get_logger)]
+    dependencies=[]
 )
 
-# [Session, Depends(get_db_session)]
-_fileHandler = Annotated[FileHandler, Depends(get_file_handler)]
-Logger = Annotated[LoggingService, Depends(get_logger)]
 db = Session()
+foundation_email_handler = FoundationEmailHandler()
+file_handler = FileHandler()
 
 # NOTE: foundations are organizations with tier level 2
 
 @router.get("/")
-async def retrieve_foundations(file_handler:_fileHandler, p: int = 1, c: int = 10):
+async def retrieve_foundations(p: int = 1, c: int = 10):
     """
     Retrieve foundations.
     """
@@ -53,7 +52,7 @@ async def retrieve_foundations(file_handler:_fileHandler, p: int = 1, c: int = 1
     return to_return
 
 @router.get("/{id}")
-async def retrieve_foundation(id:int, file_handler:_fileHandler):
+async def retrieve_foundation(id:int):
     """
     Retrieve foundation with `id`
     """
@@ -156,17 +155,26 @@ async def resolve_user_sponsorship_request(id:int, body:sponsorshipRequestDTO, r
 
     match body.action:
         case 'approve':
-            user.sponsor_id = sponsorship_request.foundation_id
+            _user.sponsor_id = sponsorship_request.foundation_id
             _user.updated_at = datetime.now()
 
             sponsorship_request.status = 'APPROVED'
             sponsorship_request.updated_at = datetime.now()
 
             db.commit()
+
+            foundation_name = db.query(Organization.name).filter(Organization.id == sponsorship_request.foundation_id).first()
+
+            foundation_email_handler.send_upgrade_approval_notice(_user.first_name, _user.email, foundation_name)
         case 'reject':
             sponsorship_request.status = 'REJECTED'
             sponsorship_request.updated_at = datetime.now()
+            
             db.commit()
+
+            foundation_name = db.query(Organization.name).filter(Organization.id == sponsorship_request.foundation_id).first()
+            
+            foundation_email_handler.send_upgrade_rejection_notice(_user.first_name, _user.email, foundation_name)
             return {'detail' : 'Rejected sponsorship request'}
         case _:
             res.status_code = 406

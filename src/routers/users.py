@@ -5,6 +5,7 @@ from services.db.database import Session
 from services.db.models import User, Address, UserUpgradeRequest, VerificationCode, SponsorshipRequest, Organization
 from services.log.log_handler import LoggingService
 from services.email.code_email_handler import CodeEmailHandler
+from services.email.user_email_handler import UserEmailHandler
 from services.storage.file_handler import FileHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize
@@ -22,13 +23,13 @@ from util.code_generator import generate_code
 router = APIRouter(
     prefix="/users",
     tags=["users"],
-    dependencies=[Depends(get_logger)]
+    dependencies=[]
 )
 
-Logger = Annotated[LoggingService, Depends(get_logger)]
-code_email_handler = Annotated[CodeEmailHandler, Depends(get_code_email_handler)]
-_fileHandler = Annotated[FileHandler, Depends(get_file_handler)]
 db = Session()
+file_handler = FileHandler()
+user_email_handler = UserEmailHandler()
+code_email_handler = CodeEmailHandler()
 
 class NewAddressDTO(BaseModel):
     region: str
@@ -39,7 +40,7 @@ class NewAddressDTO(BaseModel):
     coordinates: str
 
 @router.get("/")
-async def retrieve_users(file_handler:_fileHandler, p: int = 1, c: int = 10):
+async def retrieve_users(p: int = 1, c: int = 10):
     """
     Retrieves users (non-admin). Gets `c` amount of users according to `p` page
     """
@@ -66,7 +67,7 @@ async def retrieve_users(file_handler:_fileHandler, p: int = 1, c: int = 10):
     return to_return
 
 @router.get("/{id}")
-async def retrieve_user(id:int, file_handler:_fileHandler):
+async def retrieve_user(id:int):
     """
     Retrieves a particular user, identified by `id`.
     """
@@ -105,7 +106,7 @@ class BasicUserDTO(BaseModel):
     mobile: str
 
 @router.post("/basic")
-async def basic_signup(res: Response, file_handler:_fileHandler, emailer:code_email_handler, profile: UploadFile = None, body:Json = Form()):
+async def basic_signup(res: Response, profile: UploadFile = None, body:Json = Form()):
     """
     Creates level 1 user.
     Requires `fname`, `lname`, `username`, `password`, `confirmPassword`, `email`, `mobile`.
@@ -175,7 +176,7 @@ async def basic_signup(res: Response, file_handler:_fileHandler, emailer:code_em
 
     # send verification code to user
     ## thru email
-    await emailer.send_email_verfication_code(user.email, user.first_name, verification_request.code)
+    await code_email_handler.send_email_verfication_code(user.email, user.first_name, verification_request.code)
 
     # return HTTP 200
     return {
@@ -234,7 +235,7 @@ class UpgradeAccountDTO(BaseModel):
     coordinates: str
 
 @router.post("/upgrades")
-async def upgrade_personal_account(res: Response, valid_id: UploadFile, file_handler: _fileHandler, body:Json = Form(), user: AuthDetails = Depends(get_current_user)):
+async def upgrade_personal_account(res: Response, valid_id: UploadFile, body:Json = Form(), user: AuthDetails = Depends(get_current_user)):
     """
     Upgrades user to account level 2
     """
@@ -312,7 +313,7 @@ def retrieve_upgrade_requests(p: int = 1, c: int = 10, status:str = 'ALL', user:
     return requests
 
 @router.get("/upgrades/{upgrade_request_id}/valid-id")
-def retrieve_valid_id(upgrade_request_id:int, file_handler:_fileHandler, user: AuthDetails = Depends(get_current_user)):
+def retrieve_valid_id(upgrade_request_id:int, user: AuthDetails = Depends(get_current_user)):
     """
     Retrieve request valid id. Requires admin access.
     """
@@ -328,7 +329,7 @@ def retrieve_valid_id(upgrade_request_id:int, file_handler:_fileHandler, user: A
 
 
 @router.get("/upgrades/{upgrade_request_id}")
-async def retrieve_upgrade_request(file_handler:_fileHandler, res:Response, upgrade_request_id: int, user: AuthDetails = Depends(get_current_user)):
+async def retrieve_upgrade_request(res:Response, upgrade_request_id: int, user: AuthDetails = Depends(get_current_user)):
     """
     Retrieves particular user upgrade request via `upgrade_request_id`. Requires admin access.
     """
@@ -384,8 +385,10 @@ async def resolve_upgrade_request(action:str, upgrade_request_id, res:Response, 
             
             # increment user id
             user.level = 2
+            await user_email_handler.send_upgrade_approval_notice(user.first_name, user.email)
         case 'reject':
             upgrade_request.status = 'REJECTED'
+            await user_email_handler.send_upgrade_rejection_notice(user.first_name, user.email)
         case _:
             # return HTTP 406 when action is not allowed
             res.status_code = 406
@@ -395,8 +398,6 @@ async def resolve_upgrade_request(action:str, upgrade_request_id, res:Response, 
     upgrade_request.updated_at = datetime.now()
 
     db.commit()
-
-    # send email to user
 
     return {'detail' : 'Successfully resolved upgrade request.'}
 
@@ -428,7 +429,7 @@ async def edit_user_address(res: Response, body: NewAddressDTO, user: AuthDetail
     }
 
 @router.post("/profile")
-async def save_user_profile(image: UploadFile, res:Response, file_handler:_fileHandler, user: AuthDetails = Depends(get_current_user)):
+async def save_user_profile(image: UploadFile, res:Response, user: AuthDetails = Depends(get_current_user)):
     """
     Saves and sets user's profile image of user.
     """
@@ -454,7 +455,7 @@ async def save_user_profile(image: UploadFile, res:Response, file_handler:_fileH
 
 # get user profile
 @router.get("/{id}/profile")
-async def retrieve_user_profile_image(id:int, res: Response, file_handler:_fileHandler):
+async def retrieve_user_profile_image(id:int, res: Response):
     """
     Returns user profile image.
     """

@@ -2,8 +2,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from dependencies import get_logger, get_current_user
 from services.db.database import Session
-from services.db.models import Volunteer, VolunteerRequirement, ReliefEffort
-from services.log.log_handler import LoggingService
+from services.db.models import Volunteer, VolunteerRequirement, ReliefEffort, User
+from services.email.volunteer_email_handler import VolunteerEmailHandler
 from models.auth_details import AuthDetails
 from util.auth.auth_tool import authorize, is_authorized
 from sqlalchemy import and_
@@ -16,8 +16,8 @@ router = APIRouter(
     dependencies=[Depends(get_logger)]
 )
 
-Logger = Annotated[LoggingService, Depends(get_logger)]
 db = Session()
+volunteer_email_handler = VolunteerEmailHandler()
 
 @router.get("/{id}")
 def retrieve_volunteers(id:int, p: int = 1, c: int = 10):
@@ -130,7 +130,7 @@ def apply_as_volunteer(id:int, res:Response, user:AuthDetails = Depends(get_curr
     return {"details": "Successfully applied as a volunteer."}
 
 @router.patch("/{id}/approve/{user_id}")
-def approve_application (id:int, user_id:int, res:Response, user : AuthDetails = Depends(get_current_user)):
+async def approve_application (id:int, user_id:int, res:Response, user : AuthDetails = Depends(get_current_user)):
     """
     Approve volunteer application
     """
@@ -158,12 +158,14 @@ def approve_application (id:int, user_id:int, res:Response, user : AuthDetails =
     volunteer.status = 'APPROVED'
 
     db.commit()
-    #missing feature - send notification through email
+    
+    _user:User = db.query(User).filter(and_(User.id == volunteer.volunteer_id)).first()
+    await volunteer_email_handler.send_volunteer_acceptance_notice(_user.first_name, _user.email, relief.name)
 
     return {"detail": "Volunteer approved."}
 
 @router.patch("/{id}/reject/{user_id}")
-def reject_application (id:int, user_id:int, res:Response):
+async def reject_application (id:int, user_id:int, res:Response, user:AuthDetails = Depends(get_current_user)):
     """
     Reject volunteer application
     """
@@ -193,7 +195,8 @@ def reject_application (id:int, user_id:int, res:Response):
 
     db.commit()
     
-    #missing feature - send notification through email
+    _user:User = db.query(User).filter(and_(User.id == volunteer.volunteer_id)).first()
+    await volunteer_email_handler.send_volunteer_rejection_notice(_user.first_name, _user.email, relief.name)
 
     return {"detail": "Volunteer rejected."}
 
@@ -203,8 +206,6 @@ def remove_application (id:int, user_id:int, res:Response, user: AuthDetails = D
     Remove application
     """
     authorize(user, 1,4)
-
-    # implement authorization here
 
     volunteerRequirement:VolunteerRequirement = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.relief_id == id, VolunteerRequirement.is_deleted == False)).first()
 
