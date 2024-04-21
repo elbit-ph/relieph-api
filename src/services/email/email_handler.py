@@ -13,7 +13,7 @@ class EmailHandler():
             "Accept": "application/json",
             "X-Sib-Sandbox" : "drop"
         }
-        self.sender_email = os.environ("EMAIL")
+        self.sender_email = os.environ.get("EMAIL")
     
     def craft_email_body(self, name:str, email:str, subject:str, htmlContent:str):
         body = {

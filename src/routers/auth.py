@@ -64,8 +64,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         "refresh_token": create_refresh_token(user.username, user.level),
     }
 
-@router.post("/forgot-password", summary="Creates password reset request and sends verification code to user's email.")
-async def forgot_password(email: ForgotPasswordDTO, code_email_handler:CodeEmailHandler):
+@router.post("/forgot-password")
+async def forgot_password(email: ForgotPasswordDTO):
     """
     Requests for verification code for password reset
     """
