@@ -106,6 +106,7 @@ class ReliefEffort(Base):
     updated_at = Column(DateTime(True))
     account_number = Column(String(100))
     money_platform = Column(String(200))
+    deployment_date = Column(Date)
 
 
 class ReliefPaymentKey(Base):

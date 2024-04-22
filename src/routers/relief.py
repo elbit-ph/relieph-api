@@ -142,6 +142,7 @@ class CreateReliefEffortDTO(BaseModel):
     address:ReliefAddressDTO
     # dates
     start_date: date
+    deployment_date: date
     end_date: date
     # monetary goal & account details
     monetary_goal: float
@@ -162,10 +163,11 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
     
     # validate input
     body.start_date = date.fromisoformat(body.start_date)
+    body.deployment_date = date.fromisoformat(body.deployment_date)
     body.end_date = date.fromisoformat(body.end_date)
 
     # validate dates
-    if body.start_date < date.today() or body.end_date < date.today():
+    if body.start_date < date.today() or body.end_date < date.today() or body.deployment_date < date.today():
         res.status_code = 400
         return {
             "detail" : "Invalid date input."
@@ -187,6 +189,7 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
     relief.account_number = body.accountno
     relief.money_platform = body.platform
     relief.start_date = body.start_date
+    relief.deployment_date = body.deployment_date
     relief.end_date = body.end_date
     relief.phase = 'For Approval'
 
@@ -226,9 +229,8 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
         inkind_requirement.count = i_r.count
         inkind_requirement.relief_id = relief.id
         inkind_requirement_list.append(inkind_requirement)
-
-    db.add_all(inkind_requirement_list)
-    db.commit()
+    if inkind_requirement_list.count() > 0:
+        db.add_all(inkind_requirement_list)
 
     # save volunteer requirements
 
@@ -241,7 +243,9 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
         volunteer_requirement.relief_id = relief.id
         volunter_requirement_list.append(volunteer_requirement)
     
-    db.add_all(volunter_requirement_list)
+    if volunter_requirement_list.count() > 0:
+        db.add_all(volunter_requirement_list)
+
     db.commit()
 
     return {"detail": "Relief effort successfully created"}
@@ -259,6 +263,7 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Jso
     
     # validate date input
     body.start_date = date.fromisoformat(body.start_date)
+    body.deployment_date = date.fromisoformat(body.deployment_date)
     body.end_date = date.fromisoformat(body.end_date)
 
     org: Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False, Organization.is_active == True)).first()
@@ -274,7 +279,7 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Jso
         return {"detail": "Not authorized to create relief effort."}
 
     # validate date input
-    if body.start_date < date.today() or body.end_date < date.today():
+    if body.start_date < date.today() or body.end_date < date.today() or body.deployment_date < date.today():
         res.status_code = 400
         return {
             "detail" : "Invalid date input."
@@ -294,6 +299,7 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Jso
     relief.account_number = body.accountno
     relief.money_platform = body.platform
     relief.start_date = body.start_date
+    relief.deployment_date = body.deployment_date
     relief.end_date = body.end_date
     relief.phase = 'For Approval'
 
@@ -332,8 +338,8 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Jso
         inkind_requirement.relief_id = relief.id
         inkind_requirement_list.append(inkind_requirement)
 
-    db.add_all(inkind_requirement_list)
-    db.commit()
+    if inkind_requirement_list.count() > 0:
+        db.add_all(inkind_requirement_list)
 
     # save volunteer requirements
     volunter_requirement_list = []
@@ -345,8 +351,8 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Jso
         volunteer_requirement.relief_id = relief.id
         volunter_requirement_list.append(volunteer_requirement)
     
-    db.add_all(volunter_requirement_list)
-    db.commit()
+    if volunter_requirement_list.count() > 0:
+        db.add_all(volunter_requirement_list)
 
     if org.tier > 1:
         # automatically set relief to active if org tier
