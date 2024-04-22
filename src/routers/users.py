@@ -93,8 +93,31 @@ async def retrieve_user(id:int):
         "firstname" : user.first_name,
         "lastname" : user.last_name,
         "level" : user.level,
+        "is_verified" : user.is_verified,
         "profile" : profile_link
     }
+
+@router.get("/is-username-taken")
+async def check_if_username_is_taken(username:str, res:Response):
+    """
+    Checks if username is already taken.
+    """
+    user:User = db.query(User).filter(and_(User.username == username, User.is_deleted == False)).first()
+    # check if user with `username` exists
+    if user is None:
+        return False
+    return True
+
+@router.get("/is-email-taken")
+async def check_if_email_is_taken(email:str, res:Response):
+    """
+    Checks if email is already taken
+    """
+    user:User = db.query(User).filter(and_(User.email == email, User.is_deleted == False)).first()
+    # check if user with `email` exists
+    if user is None:
+        return False
+    return True
 
 class BasicUserDTO(BaseModel):
     fname: str
@@ -135,13 +158,6 @@ async def basic_signup(res: Response, body:BasicUserDTO):
         return {
             "detail": "Mismatched passwords"
         }
-    
-    # check if image is valid
-    #if is_image_valid(profile) == False:
-        #res.status_code = 400
-        #return {
-        #    "detail" : "Invalid profile image format."
-        #}
 
     # instantiates new user
     user = User()
@@ -158,10 +174,6 @@ async def basic_signup(res: Response, body:BasicUserDTO):
     # save user to db
     db.add(user)
     db.commit()
-
-    # uploads profile
-    #if profile is not None:
-    #    resu = await file_handler.upload_file(profile, user.id, 'users')
 
     # create verification request
     verification_request:VerificationCode = VerificationCode()
@@ -313,7 +325,7 @@ def retrieve_upgrade_requests(p: int = 1, c: int = 10, status:str = 'ALL', user:
     return requests
 
 @router.get("/upgrades/{upgrade_request_id}/valid-id")
-def retrieve_valid_id(upgrade_request_id:int, user: AuthDetails = Depends(get_current_user)):
+async def retrieve_valid_id(upgrade_request_id:int, res:Response, user: AuthDetails = Depends(get_current_user)):
     """
     Retrieve request valid id. Requires admin access.
     """
@@ -321,12 +333,23 @@ def retrieve_valid_id(upgrade_request_id:int, user: AuthDetails = Depends(get_cu
     # check if user is authorized
     authorize(user, 4, 4)
 
-    # retrieve valid id
-    return
-
-    # return file
+    upgrade_request:UserUpgradeRequest = db.query(UserUpgradeRequest).filter(and_(UserUpgradeRequest.id == upgrade_request_id)).first()
     
+    # check if upgrade request exists
+    if upgrade_request is None:
+        res.status_code = 404
+        return {'detail' : 'User upgrade request non-existing'}
 
+    # retrieve valid id
+    resu = await file_handler.retrieve_files(upgrade_request.user_id, 'valid_ids')
+
+    # check if image retrieval was successful
+    if resu[1] == False:
+        res.status_code = 400
+        return {'detail' : 'Error getting images'}
+    
+    # return file link
+    return resu[0]
 
 @router.get("/upgrades/{upgrade_request_id}")
 async def retrieve_upgrade_request(res:Response, upgrade_request_id: int, user: AuthDetails = Depends(get_current_user)):
@@ -400,6 +423,31 @@ async def resolve_upgrade_request(action:str, upgrade_request_id, res:Response, 
     db.commit()
 
     return {'detail' : 'Successfully resolved upgrade request.'}
+
+class EditUserDetailsDTO(BaseModel):
+    email:str = None
+    mobile:str = None
+
+@router.patch("/details")
+async def edit_user_details(body:EditUserDetailsDTO, res:Response, user: AuthDetails = Depends(get_current_user)):
+    """
+    Edits user details.
+    """
+    
+    # check for authorization
+    authorize(user, 1, 4)
+
+    # get user
+    user_:User = db.query(User).filter(User.id == user.user_id).first()
+
+    # edit details
+    user_.email = body.email if body.email != None and body.email != "" else user_.email
+    user_.mobile = body.mobile if body.mobile != None and body.mobile != "" else user_.mobile
+
+    # save changes
+    db.commit()
+
+    return {'detail': 'Successfully edited user details.'}
 
 @router.patch("/address")
 async def edit_user_address(res: Response, body: NewAddressDTO, user: AuthDetails = Depends(get_current_user)):#
