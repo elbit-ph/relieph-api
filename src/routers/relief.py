@@ -103,7 +103,7 @@ async def retrieve_relief_effort(relief_effort_id:int):
     """
     Returns relief effort identified by `relief_effort_id`
     """
-    relief:ReliefEffort = db.query(ReliefEffort).filter(ReliefEffort.id == id).first()
+    relief:ReliefEffort = db.query(ReliefEffort).filter(ReliefEffort.id == relief_effort_id).first()
 
     # checks if relief effort exists
     if relief is None:
@@ -112,7 +112,7 @@ async def retrieve_relief_effort(relief_effort_id:int):
             detail="Organization not found."
         )
 
-    resu = await file_handler.retrieve_files(id, f'relief-efforts/{id}/main')
+    resu = await file_handler.retrieve_files(relief_effort_id, f'relief-efforts/{id}/main')
 
     # retrieve monetary progress
     if resu[1] == False:
