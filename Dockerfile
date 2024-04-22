@@ -9,7 +9,6 @@ WORKDIR /app/src
 
 # install packages
 RUN pip install --no-cache-dir --upgrade -r /app/src/requirements.txt
-RUN pip install bs4 numpy pandas joblib nltk scikit-learn
 
 # expose port 8000 to be used to received requests
 EXPOSE 8000

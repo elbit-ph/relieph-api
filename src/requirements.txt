@@ -2,10 +2,15 @@ async-timeout==4.0.3
 asyncpg==0.29.0
 apscheduler==3.10.4
 bcrypt==4.1.2
+bs4==0.0.2
 fastapi==0.110.1
 importlib-metadata==7.0.1
+joblib==1.4.0
 llvmlite==0.42.0
 minio==7.2.5
+nltk==3.8.1
+numpy==1.26.4
+pandas==2.2.2
 Pillow==10.3.0
 pydantic==1.10.12
 python-dotenv==1.0.1
@@ -16,6 +21,7 @@ python-multipart==0.0.9
 pytz==2023.3.post1
 requests==2.31.0
 starlette==0.37.2
+scikit-learn==1.4.2
 SQLAlchemy==1.4.52
 urllib3==2.0.7
 uvicorn==0.29.0
