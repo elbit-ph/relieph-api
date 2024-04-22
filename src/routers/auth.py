@@ -106,17 +106,7 @@ async def verify_code(email:str, code:str, response:Response):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid verification code."
         )
-    # check if code is expired
-    #if code_.expired_at < utc.localize(datetime.utcnow()):
-    #    # expired code
-    #    db.delete(code_)
-    #    db.commit()
-    #    raise HTTPException(
-    #        status_code=status.HTTP_400_BAD_REQUEST,
-    #        detail="Expired code."
-    #    )
-    # returns user's id
-    # print(code_.VerifcationCode)
+
     response.status_code = status.HTTP_202_ACCEPTED
     return {"userId" : code_[0].user_id}
 
@@ -139,14 +129,7 @@ async def reset_password(body:PasswordResetModel, response:Response):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid verification code."
         )
-    # check if code is expired
-    #if code.expired_at < utc.localize(datetime.utcnow()):
-    #    db.delete(code)
-    #    db.commit()
-    #    raise HTTPException(
-    #        status_code=status.HTTP_400_BAD_REQUEST,
-    #        detail="Expired code."
-    #    )
+
     # check if passwords match
     if body.password != body.confirm_password:
         raise HTTPException(
