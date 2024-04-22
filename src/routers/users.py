@@ -106,14 +106,14 @@ class BasicUserDTO(BaseModel):
     mobile: str
 
 @router.post("/basic")
-async def basic_signup(res: Response, profile: UploadFile = None, body:Json = Form()):
+async def basic_signup(res: Response, body:BasicUserDTO):
     """
     Creates level 1 user.
     Requires `fname`, `lname`, `username`, `password`, `confirmPassword`, `email`, `mobile`.
     """
 
     # parses body from JSON input in multipart form
-    body:BasicUserDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
+    # body:BasicUserDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
 
     # check if email is already used  
     if db.query(User).filter(User.email == body.email).first() != None:
@@ -137,11 +137,11 @@ async def basic_signup(res: Response, profile: UploadFile = None, body:Json = Fo
         }
     
     # check if image is valid
-    if is_image_valid(profile) == False:
-        res.status_code = 400
-        return {
-            "detail" : "Invalid profile image format."
-        }
+    #if is_image_valid(profile) == False:
+        #res.status_code = 400
+        #return {
+        #    "detail" : "Invalid profile image format."
+        #}
 
     # instantiates new user
     user = User()
@@ -160,8 +160,8 @@ async def basic_signup(res: Response, profile: UploadFile = None, body:Json = Fo
     db.commit()
 
     # uploads profile
-    if profile is not None:
-        resu = await file_handler.upload_file(profile, user.id, 'users')
+    #if profile is not None:
+    #    resu = await file_handler.upload_file(profile, user.id, 'users')
 
     # create verification request
     verification_request:VerificationCode = VerificationCode()
