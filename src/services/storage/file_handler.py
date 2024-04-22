@@ -70,7 +70,7 @@ class FileHandler():
         if len(files_to_return) == 0:
             return ("NoImagesFound", False)
 
-        return files_to_return
+        return (files_to_return, True)
     
     # upload a single file
     async def upload_file(self, file:UploadFile, id:int, to:str):
