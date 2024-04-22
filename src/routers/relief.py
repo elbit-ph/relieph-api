@@ -1,7 +1,7 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Form
 from dependencies import get_current_user
-from services.db.database import Session
+from services.db.database import Session, engine
 from services.db.models import Organization, User, Address, ReliefEffort, ReliefBookmark, ReliefComment, InkindDonationRequirement, InkindDonation, VolunteerRequirement, ReliefUpdate
 from services.storage.file_handler import FileHandler
 from services.email.relief_email_handler import ReliefEmailHandler
@@ -10,11 +10,12 @@ from util.auth.auth_tool import authorize
 from util.files.image_validator import is_image_valid
 from pydantic import BaseModel
 from datetime import datetime, date
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, text
 from typing import List
 from pydantic import Json
 import json
 from types import SimpleNamespace
+from sqlalchemy import Integer, Column
 
 router = APIRouter(
     prefix="/reliefs",
@@ -98,6 +99,50 @@ def retrieve_releief_efforts(body:ReliefEffortRetrievalDTO, p: int = 1, c: int =
     
     return to_return
 
+def get_inkind_requirements_total(relief_id:int):
+    inkind_requirements = []
+
+    with engine.connect() as con:
+        rs = con.execute(f"SELECT \
+                            idr.name,\
+                            idr.description,\
+                            idr.count AS target,\
+                            idr.count - (SELECT COUNT(*) FROM inkind_donations id WHERE id.inkind_requirement_id = idr.id AND id.status = 'DELIVERED') AS count\
+                            FROM inkind_donation_requirements idr\
+                            WHERE idr.relief_id = {relief_id}")
+
+        for row in rs:
+            inkind_requirements.append({
+                'name' : row[0],
+                'description' : row[1],
+                'target' : row[2],
+                'count' : row[3]
+            })
+
+    return inkind_requirements
+
+def get_volunteer_requirements_total(relief_id:int):
+
+    volunteer_requirements = []
+
+    with engine.connect() as con:
+        rs = con.execute(f"SELECT \
+                            vdr.name,\
+                            vdr.description,\
+                            vdr.count AS target,\
+                            vdr.count - (SELECT COUNT(*) FROM volunteers vd WHERE vd.volunteer_requirement_id = vdr.id AND vd.status = 'ACCEPTED') AS count\
+                            FROM volunteer_requirements vdr\
+                            WHERE vdr.relief_id = {relief_id}")
+        for row in rs:
+            volunteer_requirements.append({
+                'name' : row[0],
+                'description' : row[1],
+                'target' : row[2],
+                'count' : row[3]
+            })
+
+    return volunteer_requirements
+
 @router.get("/{relief_effort_id}")
 async def retrieve_relief_effort(relief_effort_id:int):
     """
@@ -112,18 +157,19 @@ async def retrieve_relief_effort(relief_effort_id:int):
             detail="Organization not found."
         )
 
-    resu = await file_handler.retrieve_files(relief_effort_id, f'relief-efforts/{id}/main')
+    resu = await file_handler.retrieve_files(relief_effort_id, f'relief-efforts/main')
+
+    to_return = {
+            'profile' : relief,
+            'inkindRequirements' : get_inkind_requirements_total(relief.id),
+            'volunteerRequirements' : get_volunteer_requirements_total(relief.id)
+    }
 
     # retrieve monetary progress
-    if resu[1] == False:
-        return {
-            'profile' : relief
-        }
+    if resu[1] == True:
+        to_return['images'] = resu[0]
     
-    return {
-        'profile' : relief,
-        'images' : resu[0]
-    }
+    return to_return
 
 class ReliefAddressDTO(BaseModel):
     region:str
@@ -199,7 +245,7 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
     # save images
 
     # upload pictures to their own folder
-    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/{relief.id}/main')
+    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/main')
 
     if resu[1] == False:
         # do not terminate outright
@@ -307,7 +353,7 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Jso
     db.commit()
 
     # upload images files
-    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/{relief.id}/main')
+    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/main')
 
     if resu[1] == False:
         # do not terminate outright
