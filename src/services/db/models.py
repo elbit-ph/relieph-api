@@ -243,6 +243,22 @@ class Organization(Base):
     owner = relationship('User')
 
 
+class Report(Base):
+    __tablename__ = 'report'
+
+    id = Column(Integer, primary_key=True, server_default=text("nextval('report_id_seq'::regclass)"))
+    user_id = Column(ForeignKey('users.id'), nullable=False)
+    reason = Column(Text, nullable=False)
+    target_type = Column(String(50), nullable=False)
+    target_id = Column(Integer, nullable=False)
+    status = Column(String(50), nullable=False, server_default=text("'pending'::character varying"))
+    is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
+    created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(True))
+
+    user = relationship('User')
+
+
 class Volunteer(Base):
     __tablename__ = 'volunteers'
 
@@ -273,5 +289,5 @@ class SponsorshipRequest(Base):
 
     foundation = relationship('Organization', primaryjoin='SponsorshipRequest.foundation_id == Organization.id')
     owner = relationship('Organization', primaryjoin='SponsorshipRequest.owner_id == Organization.id')
-
+    
 Base.metadata.create_all(engine)

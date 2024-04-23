@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from routers import auth, users, organizations, relief, foundations, volunteers, inkind, monetary, headlines
+from routers import auth, users, organizations, relief, foundations, volunteers, inkind, monetary, headlines, reports
 from util.headline_classifier.scheduler import scheduler
 
 load_dotenv()
@@ -27,6 +27,7 @@ api_app.include_router(foundations.router)
 api_app.include_router(inkind.router)
 api_app.include_router(monetary.router)
 api_app.include_router(headlines.router)
+api_app.include_router(reports.router)
 
 app = FastAPI(title="main app")
 
