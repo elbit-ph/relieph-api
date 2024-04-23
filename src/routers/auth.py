@@ -95,29 +95,20 @@ class VerifyCodeModel(BaseModel):
 
 # verify code
 @router.get("/verify-code", summary="Checks if entered code is valid. Returns user id (securely store then use in /reset-password).")
-async def verify_code(body:VerifyCodeModel, response:Response):
+async def verify_code(email:str, code:str, response:Response):
     """
     Verifies code
     """
-    code_:VerificationCode = db.query(VerificationCode).join(User).filter(VerificationCode.code == body.code and User.email == body.email and VerificationCode.user_id == User.id).first()
+    code_:VerificationCode = db.query(VerificationCode, User).filter(and_(VerificationCode.code == code, User.email == email, VerificationCode.user_id == User.id)).first()
     # check if code is right
     if code_ is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid verification code."
         )
-    # check if code is expired
-    if code_.expired_at < utc.localize(datetime.utcnow()):
-        # expired code
-        db.delete(code_)
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Expired code."
-        )
-    # returns user's id
+
     response.status_code = status.HTTP_202_ACCEPTED
-    return {"userId" : code_.user_id}
+    return {"userId" : code_[0].user_id}
 
 class PasswordResetModel(BaseModel):
     id: int
@@ -130,7 +121,7 @@ async def reset_password(body:PasswordResetModel, response:Response):
     """
     Resets password of user
     """
-    code:VerificationCode = db.query(VerificationCode).filter(VerificationCode.user_id == body.id and body.code == VerificationCode.code).first()
+    code:VerificationCode = db.query(VerificationCode).filter(and_(VerificationCode.user_id == body.id, VerificationCode.code == body.code, VerificationCode.reason == 'PASSWORD-RESET')).first()
     
     # check if code is right
     if code is None:
@@ -138,14 +129,7 @@ async def reset_password(body:PasswordResetModel, response:Response):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid verification code."
         )
-    # check if code is expired
-    if code.expired_at < utc.localize(datetime.utcnow()):
-        db.delete(code)
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Expired code."
-        )
+
     # check if passwords match
     if body.password != body.confirm_password:
         raise HTTPException(
