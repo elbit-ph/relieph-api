@@ -46,7 +46,7 @@ async def retrieve_users(p: int = 1, c: int = 10):
     """
 
     # Gets list of users
-    users:List[User] = db.query(User).filter(and_(User.is_deleted == False, User.is_verified == True, User.level < 4)).limit(c).offset((p-1)*c).all() 
+    users:List[User] = db.query(User).filter(and_(User.is_deleted == False, User.level < 4)).limit(c).offset((p-1)*c).all() 
     
     # initialize array of users
     to_return = []
@@ -73,7 +73,7 @@ async def retrieve_user(id:int):
     """
 
     # finds user
-    user:User = db.query(User).filter(and_(User.id == id, User.is_deleted)).first()
+    user:User = db.query(User).filter(and_(User.id == id, User.is_deleted == False)).first()
 
     # raise HTTP 404 error when user is not found
     if user is None:
