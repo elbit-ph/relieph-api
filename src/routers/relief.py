@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Form
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Form, Query
 from dependencies import get_current_user
 from services.db.database import Session, engine
 from services.db.models import Organization, User, Address, ReliefEffort, ReliefBookmark, ReliefComment, InkindDonationRequirement, InkindDonation, VolunteerRequirement, ReliefUpdate
@@ -11,11 +11,12 @@ from util.files.image_validator import is_image_valid
 from pydantic import BaseModel
 from datetime import datetime, date
 from sqlalchemy import and_, or_, text
-from typing import List
-from pydantic import Json
+from typing import List, Optional, Literal
+from pydantic import Json, Field
 import json
 from types import SimpleNamespace
 from sqlalchemy import Integer, Column
+from enum import Enum
 
 router = APIRouter(
     prefix="/reliefs",
@@ -36,18 +37,18 @@ class ReliefEffortRetrievalDTO(BaseModel):
 valid_needs = ['Monetary', 'Inkind', 'Volunteer Work']
 
 @router.get("/")
-def retrieve_releief_efforts(body:ReliefEffortRetrievalDTO, p: int = 1, c: int = 10):
+def retrieve_releief_efforts(keyword:str = "", category:str = "", location:str = "", needs:Annotated[list[str] | None, Query()] = ['Monetary', 'Inkind', 'Volunteer Work'], p: int = 1, c: int = 10):
     """
-    Retrieves relief efforts. Paginated by count `c` and page `p`.
+    Retrieves relief efforts. Paginated by count `c` and page `p`. Note: to submit multiple needs, do so by adding multiple `needs` query parameters.
     """
-
+    print(needs)
     to_return = []
     
-    detail_query = and_(ReliefEffort.is_active == True, ReliefEffort.disaster_type.contains(body.category), ReliefEffort.name.contains(body.keyword))
+    detail_query = and_(ReliefEffort.is_active == True, ReliefEffort.disaster_type.contains(category), ReliefEffort.name.contains(keyword))
     
     address_query = None
 
-    splitted_loc = body.location.split(', ')
+    splitted_loc = location.split(', ')
 
     if len(splitted_loc) == 2:
         address_query = and_(Address.owner_id == ReliefEffort.id, Address.city == splitted_loc[0], Address.region == splitted_loc[1])
@@ -58,14 +59,14 @@ def retrieve_releief_efforts(body:ReliefEffortRetrievalDTO, p: int = 1, c: int =
 
     vol_query = and_(VolunteerRequirement.relief_id == ReliefEffort.id, VolunteerRequirement.is_deleted == False)
 
-    if len(body.needs) < 3 or body.needs != valid_needs.sort():
+    if len(needs) < 3 or needs != valid_needs.sort():
         # some needs
-        for i in range(0, len(body.needs)):
-            body.needs[i] = body.needs[i].lower()
+        for i in range(0, len(needs)):
+            needs[i] = needs[i].lower()
 
-        match len(body.needs):
+        match len(needs):
             case 1:
-                match body.needs[0]:
+                match needs[0]:
                     case 'monetary':
                         # with monetary requirements
                         to_return = db.query(ReliefEffort, Address).filter(or_(ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
@@ -78,8 +79,8 @@ def retrieve_releief_efforts(body:ReliefEffortRetrievalDTO, p: int = 1, c: int =
                     case _:
                         to_return = []
             case 2:
-                body.needs.sort()
-                match body.needs:
+                needs.sort()
+                match needs:
                     case ['inkind', 'monetary']:
                         # with inkind and monetary requirements
                         to_return = db.query(ReliefEffort, Address, InkindDonationRequirement).filter(and_(detail_query, address_query, inkind_query, ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
@@ -179,6 +180,17 @@ class ReliefAddressDTO(BaseModel):
     zipcode:int
     coordinates:str
 
+# inkind requirement: name, count
+# volunteer reuqirement: name, count
+
+class InkindRequirementDTO(BaseModel):
+    name:str
+    count:int
+
+class VolunteerRequirementDTO(BaseModel):
+    name:str
+    count:int    
+
 class CreateReliefEffortDTO(BaseModel):
     # basic info
     name: str # title
@@ -194,18 +206,16 @@ class CreateReliefEffortDTO(BaseModel):
     monetary_goal: float
     accountno: str
     platform: str
-    inkind_requirements: list
-    volunteer_requirements: list # object list {type, slots, duration}
+    inkind_requirements: List[InkindRequirementDTO]
+    volunteer_requirements: List[VolunteerRequirementDTO]
     sponsor_message: str = None
 
 @router.post("/as-user")
-async def create_relief_effort_as_individual(res: Response, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+async def create_relief_effort_as_individual(res: Response, body: CreateReliefEffortDTO = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
     """
     Creates relief effort as a user.
     """
     authorize(user, 2, 4)
-    
-    body:CreateReliefEffortDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
     
     # validate input
     body.start_date = date.fromisoformat(body.start_date)
@@ -277,7 +287,8 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
         inkind_requirement_list.append(inkind_requirement)
     if inkind_requirement_list.count() > 0:
         db.add_all(inkind_requirement_list)
-
+    
+    # volunteer requirement
     # save volunteer requirements
 
     volunter_requirement_list = []
@@ -288,7 +299,7 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
         volunteer_requirement.count = v_r.count
         volunteer_requirement.relief_id = relief.id
         volunter_requirement_list.append(volunteer_requirement)
-    
+
     if volunter_requirement_list.count() > 0:
         db.add_all(volunter_requirement_list)
 
@@ -297,15 +308,12 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
     return {"detail": "Relief effort successfully created"}
 
 @router.post("/as-organization/{id}")
-async def create_relief_effort_as_organization(res: Response, id: int, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+async def create_relief_effort_as_organization(res: Response, id: int, body: CreateReliefEffortDTO = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
     """
     Create relief effort as an organization.
     """
 
     authorize(user, 2, 4)
-
-    # parse JSON Body from multipart form
-    body:CreateReliefEffortDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
     
     # validate date input
     body.start_date = date.fromisoformat(body.start_date)
@@ -721,16 +729,13 @@ class CreateUpdateDTO(BaseModel):
     type: str = None
 
 @router.post("/{id}/updates")
-async def create_update(id:int, res:Response, body: Json = Form(), images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
+async def create_update(id:int, res:Response, body: CreateUpdateDTO = Form(), images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
     """
     Create update for relief `id`
     """
 
     # check user authorization
     authorize(user, 2, 4)
-    
-    # parse JSON request from multipart form
-    body:CreateUpdateDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
     
     # check if relief exists
     relief:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == id, ReliefEffort.is_active == True)).first()

@@ -1,5 +1,5 @@
 from typing import Annotated, List
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response
+from fastapi import APIRouter, Depends, Form, UploadFile, HTTPException, status, Response
 from dependencies import get_current_user
 from services.db.database import Session
 from services.db.models import Organization, User, Address, SponsorshipRequest
@@ -100,7 +100,7 @@ class CreateOrganizationDTO(BaseModel):
     address: OrganizationAddressDTO
 
 @router.post("/")
-async def create_organization(res:Response, profile: UploadFile, user: AuthDetails = Depends(get_current_user)):
+async def create_organization(res:Response, profile: UploadFile, body:CreateOrganizationDTO = Form(), user: AuthDetails = Depends(get_current_user)):
     """
     Creates a new organization, uploads its profile picture, and sends a notification email.
     """
