@@ -1,7 +1,7 @@
 from models.auth_details import AuthDetails
 from fastapi import APIRouter, Depends, HTTPException, status
 from services.db.models import User, Organization
-from sqlalchemy.orm import and_
+from sqlalchemy import and_
 
 def authorize(user: AuthDetails, min_level: int = 0, max_level: int = 5):
     if user is None:

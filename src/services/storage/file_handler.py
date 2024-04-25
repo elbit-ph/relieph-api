@@ -1,10 +1,12 @@
 import os
+import cloudinary.search
+import cloudinary.search_folders
 from dotenv import load_dotenv
-from minio import Minio
-from minio.commonconfig import SnowballObject
-from minio.deleteobjects import DeleteObject
 from typing import List
 from fastapi import UploadFile
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 
 load_dotenv()
 
@@ -12,66 +14,43 @@ class FileHandler():
     def __init__(self):
         self.allowed_directories = ('users', 'organizations', 'relief-efforts', 'updates', 'valid_ids')
         self.allowed_img_suffix = ('png', 'jpg')
-        self.bucket_name = 'relieph' # place in .env later
-        self.handler:Minio = Minio(endpoint=os.environ.get('MINIO_URI'),
-            access_key=os.environ.get('MINIO_ACCESS_KEY'),
-            secret_key=os.environ.get('MINIO_SECRET_KEY'),
-            secure=False
+        cloudinary.config(
+            cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME'),
+            api_key = os.environ.get('CLOUDINARY_API_KEY'),
+            api_secret = os.environ.get('CLOUDINARY_SECRET'),
+            secure=True
         )
-    
-    # checks existence of particular file
-    async def is_file_existent(self, filename:str):
-        if self.handler.get_object(self.bucket_name, filename) == None:
-            # file non-existent
-            return False
-        return True
 
     # retrieves file from object store
     async def retrieve_file(self, id:int, from_:str):
         if from_ not in self.allowed_directories:
             return ('InvalidDirectory', False)
-        to_return = ""
 
-        # iterate thru object store for file
-        for obj in self.handler.list_objects(self.bucket_name, prefix=from_, recursive=True):
-            if obj.object_name.split('/')[-1].split('.')[0] == str(id):
-                print(obj.object_name)
-                to_return = obj.object_name
-                break
+        filename=f"relieph/{from_}/{id}"
 
-        if to_return == "":
+        if self.file_exists(filename, from_) == False:
             return ('NonExistentFile', False)
-        
-        # return presigned url
-        presigned_url = self.handler.presigned_get_object(self.bucket_name, obj.object_name)
-
-        return (presigned_url, True)
+        image_link = None
+        try:
+            image_link = cloudinary.api.resource(filename)['secure_url']
+        except Exception as e:
+            return ('ErrorRetrieving', False)
+        return (image_link, True)
     
     # retrieve multiple files
     async def retrieve_files(self, id:int, from_:str):
-        dir_to_return = ""
+        resu = None
+
+        try:
+            resu = cloudinary.api.resources(type='upload',prefix=f"relieph/{from_}/{id}")
+        except Exception as e:
+            return ('ErrorRetrievingFiles', False)
+
+        # extract only `secure_url`
+        parsed_resu = map(lambda image: image['secure_url'] ,resu['resources'])
         
-        # find directory to return
-        for obj in self.handler.list_objects(self.bucket_name, prefix=f'{from_}/'):
-            if obj.object_name[-1] != '/': # not a directory
-                continue
-            if obj.object_name.split('/')[-2] == str(id):
-                dir_to_return = obj.object_name
-                break
+        return (list(parsed_resu), True)
 
-        if dir_to_return == "":
-            return ("NoDirectoryFound", False)
-
-        files_to_return = []
-        for obj in self.handler.list_objects(self.bucket_name, prefix=f'{from_}/{id}', recursive=True):
-            # add presigned url to list of images
-            files_to_return.append(self.handler.presigned_get_object(self.bucket_name, obj.object_name))
-
-        if len(files_to_return) == 0:
-            return ("NoImagesFound", False)
-
-        return files_to_return
-    
     # upload a single file
     async def upload_file(self, file:UploadFile, id:int, to:str):
         
@@ -82,12 +61,7 @@ class FileHandler():
             # handle file checking outside this function
             suffix = file.filename.split('.')[-1]
             file.filename = f'{id}.{suffix}'
-            self.handler.put_object(
-                bucket_name=self.bucket_name,
-                object_name=f'{to}/{file.filename}',
-                data=file.file,
-                length=file.file.__sizeof__()
-            )
+            cloudinary.uploader.upload(file.file, public_id=f"relieph/{to}/{id}")
 
         except Exception as e:
             print(e)
@@ -105,12 +79,7 @@ class FileHandler():
             for file in files:
                 suffix = file.filename.split('.')[-1]
                 file.filename = f'{count}.{suffix}'
-                self.handler.put_object(
-                    bucket_name=self.bucket_name,
-                    object_name=f'{to}/{id}/{file.filename}',
-                    data=file.file,
-                    length=file.file.__sizeof__()
-                )
+                cloudinary.uploader.upload(file.file, public_id=f"relieph/{to}/{id}/{file.filename}")
                 count += 1
 
         except:
@@ -120,47 +89,20 @@ class FileHandler():
     
     # deletes a single image
     async def remove_file(self, id:int, from_:str):
-        if from_ not in self.allowed_directories:
-            return ('InvalidDirectory', False)
-        to_delete = ""
-
-        # iterate thru object store for file
-        for obj in self.handler.list_objects(self.bucket_name, prefix=from_, recursive=True):
-            if obj.object_name.split('/')[-1].split('.')[0] == str(id):
-                print(obj.object_name)
-                to_delete = obj.object_name
-                break
-
-        if to_delete == "":
-            return ('NonExistentFile', False)
-        
-        self.handler.remove_object(self.bucket_name, to_delete)
+        try:
+            cloudinary.uploader.destroy(f"relieph/{from_}/{id}")
+        except Exception as e:
+            return ('ErrorDeleting', False)
         
         return ('Success', True)
     
     # delete multiple files
     def remove_files(self, id:int, from_:str):
-        dir_to_return = ""
+        try:
+            cloudinary.api.delete_resources_by_prefix(f"{from_}/{id}")
+        except Exception as e:
+            return ('ErrorDeleting', False)
         
-        # find directory to return
-        for obj in self.handler.list_objects(self.bucket_name, prefix=f'{from_}/'):
-            if obj.object_name[-1] != '/': # not a directory
-                continue
-            if obj.object_name.split('/')[-2] == str(id):
-                dir_to_return = obj.object_name
-                break
-
-        if dir_to_return == "":
-            return ("NoDirectoryFound", False)
-        
-        to_remove = []
-        
-        # creates list of items to delete
-        for obj in self.handler.list_objects(self.bucket_name, prefix=f'{from_}/{id}', recursive=True):
-            to_remove.append(DeleteObject(obj.object_name))
-        
-        self.handler.remove_objects(self.bucket_name, to_remove)
-
         return ('Success', True)
     
     async def is_file_valid(self, file:UploadFile, allowed_suffixes:List[str]):
@@ -178,25 +120,21 @@ class FileHandler():
         return True
     
     async def file_exists(self, id:int, from_:str):
-        if from_ not in self.allowed_directories:
+        try:
+            # try getting file
+            image = cloudinary.api.resource(f"relieph/{from_}/{id}")
+        except Exception as e:
             return False
-
-        # iterate thru object store for file
-        for obj in self.handler.list_objects(self.bucket_name, prefix=from_, recursive=True):
-            if obj.object_name.split('/')[-1].split('.')[0] == str(id):
-                print(obj.object_name)
-                return True
-
-        return False
+        return True
     
     async def get_user_profile(self, id:int):
         resu = await self.retrieve_file(id, 'users')
         if resu[1] == False:
-            return self.handler.presigned_get_object(self.bucket_name, 'users/default_profile.png')
+            return cloudinary.api.resource('relieph/users/default_profile')['secure_url']
         return resu[0]
     
     async def get_org_profile(self, id:int):
         resu = await self.retrieve_file(id, 'organizations')
         if resu[1] == False:
-            return self.handler.presigned_get_object(self.bucket_name, 'organizations/default.png')
+            return cloudinary.api.resource('relieph/organizations/default_profile')['secure_url']
         return resu[0]
