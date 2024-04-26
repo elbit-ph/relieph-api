@@ -42,4 +42,3 @@ app.add_middleware(
 app.mount("/api", api_app)
 
 sched.start()
-sched.start()
