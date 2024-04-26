@@ -3,7 +3,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor, ProcessPoolExecutor
 from services.db.database import engine
-from .save import start_model
+from ..generate_relief.save import start_model
+from ..headline_classifier.save import start_gen
 
 jobstore = SQLAlchemyJobStore(engine=engine)
 
@@ -16,12 +17,13 @@ job_defaults = {
     'max_instances': 3
 }
 
-scheduler_headline = BackgroundScheduler(
+sched = BackgroundScheduler(
     jobstores={'memory': jobstore},
     executors=executors,
     job_defaults=job_defaults,
     timezone=utc
 )
 
-scheduler_headline.add_job(start_model, 'interval', seconds=3600)
+sched.add_job(start_model, 'interval', seconds=3600)
+sched.add_job(start_gen, 'interval', seconds=1200)
 

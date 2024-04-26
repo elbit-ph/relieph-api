@@ -1,10 +1,11 @@
 from pytz import utc
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.memory import MemoryJobStore
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor, ProcessPoolExecutor
+from services.db.database import engine
 from .save import start_gen
 
-jobstore = MemoryJobStore()
+jobstore = SQLAlchemyJobStore(engine=engine)
 
 executors = {
     'default': ThreadPoolExecutor(5),

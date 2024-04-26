@@ -56,7 +56,6 @@ def add_data(db, headline_data):
             time.sleep(120) 
             continue
 
-
 def start_gen():
     try:
         with Session() as db:
@@ -69,8 +68,6 @@ def start_gen():
     except Exception as e:
         db.rollback()
 
-
-start_gen()
 # if __name__ == '__main__':
 #     add_data(db, headline_data(["https://www.philstar.com/headlines/2023/09/03/2293550/two-dead-over-400000-affected-habagat-due-hanna-goring"]))
 #     add_data(db, headline_data(["https://www.philstar.com/headlines/2023/12/04/2316295/magnitude-74-quake-rocks-surigao-del-sur-1-dead"]))

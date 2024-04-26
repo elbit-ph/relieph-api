@@ -1,5 +1,5 @@
 import json
-from gemini import model
+from .gemini import model
 
 json_template = '''
 {
