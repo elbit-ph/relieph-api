@@ -49,11 +49,18 @@ def headline_data(urls):
 
         disaster_type = classify_headline(title)['prediction']
 
+        article_div = soup.find('div', class_="article__writeup")
+
+        paragraphs = article_div.find_all('p')
+
+        article_paragraph = ' '.join(p.get_text() for p in paragraphs)
+
         headline_data.append({
             'title': title,
             'link': url,
             'disaster_type': disaster_type,
-            'posted_datetime': localized_time
+            'posted_datetime': localized_time,
+            'article': article_paragraph
         })
     
     return headline_data
@@ -63,3 +70,4 @@ def classified_headlines():
     article_data = headline_data(links)
 
     return article_data
+

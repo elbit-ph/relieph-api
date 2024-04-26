@@ -35,7 +35,36 @@ class Headline(Base):
     posted_datetime = Column(DateTime(True), nullable=False)
     created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
+    article = Column(Text, nullable=False)
 
+
+class GenerateRelief(Base):
+    __tablename__ = 'generated_relief'
+
+    id = Column(Integer, primary_key=True, server_default=text("nextval('generated_relief_id_seq'::regclass)"))
+    headline_id = Column(ForeignKey('headlines.id'), nullable=False)
+    relief_title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    monetary_goal = Column(Numeric, server_default=text("0.00"))
+    deployment_date = Column(Date, nullable=False)
+    is_used = Column(Boolean, nullable=False, server_default=text("false"))
+    created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(True))
+
+    headline = relationship('Headline')
+
+
+class GeneratedInkind(Base):
+    __tablename__ = 'generated_inkind'
+    
+    id = Column(Integer, primary_key=True, server_default=text("nextval('generated_inkind_id_seq'::regclass)"))   
+    generated_relief_id = Column(ForeignKey('generated_relief.id'), nullable=False)
+    item = Column(String(255), nullable=False)
+    item_desc = Column(String(255), nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+    generated_relief = relationship('GenerateRelief')
+    
 
 class InkindDonationRequirement(Base):
     __tablename__ = 'inkind_donation_requirements'

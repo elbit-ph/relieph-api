@@ -15,12 +15,12 @@ job_defaults = {
     'max_instances': 3
 }
 
-scheduler = BackgroundScheduler(
+scheduler_headline = BackgroundScheduler(
     jobstores={'memory': jobstore},
     executors=executors,
     job_defaults=job_defaults,
     timezone=utc
 )
 
-scheduler.add_job(start_model, 'interval', seconds=3600)
+scheduler_headline.add_job(start_model, 'interval', seconds=3600)
 

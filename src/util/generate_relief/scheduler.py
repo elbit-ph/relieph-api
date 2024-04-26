@@ -22,5 +22,5 @@ scheduler_relief = BackgroundScheduler(
     timezone=utc
 )
 
-scheduler_relief.add_job(start_gen, 'interval', seconds=2400)
+scheduler_relief.add_job(start_gen, 'interval', seconds=1200)
 
