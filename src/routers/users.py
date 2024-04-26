@@ -98,7 +98,7 @@ async def retrieve_user(id:int):
     """
 
     # finds user
-    user:User = db.query(User).filter(and_(User.id == id, User.is_deleted ==- False)).first()
+    user:User = db.query(User).filter(and_(User.id == id, User.is_deleted == False)).first()
 
     # raise HTTP 404 error when user is not found
     if user is None:
