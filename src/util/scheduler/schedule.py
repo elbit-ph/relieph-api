@@ -1,10 +1,12 @@
 from pytz import utc
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.memory import MemoryJobStore
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor, ProcessPoolExecutor
-from .save import start_model
+from services.db.database import engine
+from ..generate_relief.save import start_gen
+from ..headline_classifier.save import start_model
 
-jobstore = MemoryJobStore()
+jobstore = SQLAlchemyJobStore(engine=engine)
 
 executors = {
     'default': ThreadPoolExecutor(5),
@@ -15,12 +17,13 @@ job_defaults = {
     'max_instances': 3
 }
 
-scheduler = BackgroundScheduler(
+sched = BackgroundScheduler(
     jobstores={'memory': jobstore},
     executors=executors,
     job_defaults=job_defaults,
     timezone=utc
 )
 
-scheduler.add_job(start_model, 'interval', seconds=3600)
+sched.add_job(start_model, 'interval', seconds=3600)
+sched.add_job(start_gen, 'interval', seconds=1200)
 

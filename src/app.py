@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from routers import auth, users, organizations, relief, foundations, volunteers, inkind, monetary, headlines, reports
-from util.headline_classifier.scheduler import scheduler
+from util.scheduler.schedule import sched
 
 load_dotenv()
 
@@ -41,4 +41,4 @@ app.add_middleware(
 
 app.mount("/api", api_app)
 
-scheduler.start()
+sched.start()
