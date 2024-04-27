@@ -53,7 +53,7 @@ def add_data(db, headline_data, p: int = 1, c: int = 10):
         except Exception as e:
             logger.info("Error in Adding Relief Template Headline!")
             db.rollback()
-            # time.sleep(120) 
+            time.sleep(120) 
             continue
 
 def start_gen(p: int = 1, c: int = 10):
