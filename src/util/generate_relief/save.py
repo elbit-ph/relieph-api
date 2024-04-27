@@ -68,6 +68,7 @@ def start_gen(p: int = 1, c: int = 10):
     except Exception as e:
         db.rollback()
 
+
 # if __name__ == '__main__':
 #     add_data(db, headline_data(["https://www.philstar.com/headlines/2023/09/03/2293550/two-dead-over-400000-affected-habagat-due-hanna-goring"]))
 #     add_data(db, headline_data(["https://www.philstar.com/headlines/2023/12/04/2316295/magnitude-74-quake-rocks-surigao-del-sur-1-dead"]))
