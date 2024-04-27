@@ -9,7 +9,7 @@ from .relief_integrity import relief_data
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def add_data(db, headline_data):
+def add_data(db, headline_data, p: int = 1, c: int = 10):
     for data in headline_data:
         try:
 
@@ -33,7 +33,7 @@ def add_data(db, headline_data):
             db.commit()
 
             generated_relief_id = db.query(GenerateRelief.id).filter(
-                and_(GenerateRelief.headline_id == data.id)).first()
+                and_(GenerateRelief.headline_id == data.id)).limit(c).offset((p-1)*c).first()
 
             for item in relief_json['inkind_donation']:
 
@@ -56,13 +56,13 @@ def add_data(db, headline_data):
             time.sleep(120) 
             continue
 
-def start_gen():
+def start_gen(p: int = 1, c: int = 10):
     try:
         with Session() as db:
 
-            templated_data = [data[0] for data in db.query(GenerateRelief.headline_id).distinct().all()]
+            templated_data = [data[0] for data in db.query(GenerateRelief.headline_id).distinct().limit(c).offset((p-1)*c).all()]
 
-            headline_data = db.query(Headline).filter(~Headline.id.in_(templated_data)).all()
+            headline_data = db.query(Headline).filter(~Headline.id.in_(templated_data)).limit(c).offset((p-1)*c).all()
 
             add_data(db, headline_data)
     except Exception as e:

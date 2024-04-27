@@ -2,11 +2,12 @@ from typing import List
 from sqlalchemy import and_
 from datetime import datetime, timedelta
 from ..db.models import Headline
-from ..db.database import Session
+
+WEEKS=400
 
 def retrieveHeadlineData(db, p: int = 1, c: int = 10):
     current_datetime = datetime.now()
-    two_weeks = current_datetime + timedelta(weeks=2)
+    two_weeks = current_datetime + timedelta(weeks=WEEKS)
 
     headline_data: List[Headline] = (
         db.query(Headline).filter(

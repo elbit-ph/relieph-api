@@ -9,10 +9,10 @@ logger = logging.getLogger(__name__)
 
 db = Session()
 
-def add_data(db, headline_data):
+def add_data(db, headline_data, p: int = 1, c: int = 10):
     for data in headline_data:
         existing_headline = db.query(Headline).filter(
-            and_(Headline.link == data['link'])).first()    
+            and_(Headline.link == data['link'])).limit(c).offset((p-1)*c).first()    
         
         if existing_headline:
             logger.info("Duplicate Headline!")
