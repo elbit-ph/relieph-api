@@ -5,7 +5,7 @@ from ..db.models import Headline
 
 WEEKS=400
 
-def retrieveHeadlineData(db, p: int = 1, c: int = 10):
+def retrieveHeadlineData(db, p, c):
     current_datetime = datetime.now()
     two_weeks = current_datetime + timedelta(weeks=WEEKS)
 
@@ -18,9 +18,9 @@ def retrieveHeadlineData(db, p: int = 1, c: int = 10):
 
     return headline_data
 
-def fetch(db):
+def fetch(db, p, c):
     headlines = []
-    headline_data = retrieveHeadlineData(db)
+    headline_data = retrieveHeadlineData(db, p, c)
 
     for data in headline_data:
 

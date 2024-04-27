@@ -5,10 +5,10 @@ from ..db.models import GenerateRelief, GeneratedInkind
 
 WEEKS = 400
 
-def generated_relief(db, p: int = 1, c: int = 10):
+def generated_relief(db, p, c):
     results = []
 
-    headline_data = retrieveHeadlineData(db)
+    headline_data = retrieveHeadlineData(db, p, c)
     for data in headline_data:
         headline_id = data.id
 

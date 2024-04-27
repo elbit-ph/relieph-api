@@ -39,3 +39,18 @@ model = genai.GenerativeModel(
   safety_settings=safety_settings
 )
 
+json_template = '''
+{
+    "relief_title": "",
+    "description": "",
+    "monetary_goal": "",
+    "inkind_donation": [
+        {
+            "item": "",
+            "item_desc": "",
+            "quantity": ""
+        }
+    ],
+    "deployment_date": "",
+}
+'''
