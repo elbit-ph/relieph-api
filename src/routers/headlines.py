@@ -15,9 +15,9 @@ router = APIRouter(
 DB = Annotated[Session, Depends(get_db_session)]
 
 @router.get("/recent-disaster")
-async def retrieve_disaster_headlines(db: DB):
-    return fetch(db)
+async def retrieve_disaster_headlines(db: DB, p: int = 1, c: int = 10):
+    return fetch(db, p, c)
 
 @router.get("/generated-relief-effort")
-async def retrieve_generated_reliefs(db: DB):
-    return generated_relief(db)
+async def retrieve_generated_reliefs(db: DB, p: int = 1, c: int = 10):
+    return generated_relief(db, p, c)
