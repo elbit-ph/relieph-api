@@ -7,7 +7,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def data_handling(generated_relief_data):
-    for i, data in enumerate(generated_relief_data):
+    for data in generated_relief_data:
         data['urgency'] = -1
 
 def data_integrity(data):
@@ -18,7 +18,7 @@ def data_integrity(data):
     return extracted_list
 
 def generated_relief_urgency(generated_relief_data):
-    prompt = "Given this list of relief effort, output a python list in equivalent length containing just numbers (1 - number of relief effort) and rank them accordingly based on perceived urgency of such relief effort. Strictly output only the python list containing the rankings of the relief effort.\n\n"
+    prompt = "Given this list of relief effort, output a python list in equivalent length containing just numbers (1 - number of relief effort) and rank them accordingly based on perceived urgency of the relief response or disaster event (how important or significant or imediate of action is the relief effort or disaster) of such relief effort. Strictly output only the python list containing the rankings of the relief effort.\n\n"
 
     for data in generated_relief_data:
         prompt += f"Relief Effort Title: {data['relief_title']}\n Description: {data['description']}\n News Headline Title: {data['headline_title']}\n"
