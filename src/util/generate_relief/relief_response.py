@@ -6,5 +6,5 @@ def response(disaster_type, headline_title, article_date_posted, context):
     relief_response = model.generate_content([generate_prompt])
     data = relief_response.text.lstrip('```json')
     data = data.rstrip('```')
-    print(data)
+
     return data

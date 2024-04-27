@@ -11,6 +11,5 @@ def relief_data(response):
     data = data.rstrip('```')
 
     relief_data_dict = json.loads(data) 
-    print(relief_data_dict)
     return relief_data_dict
 
