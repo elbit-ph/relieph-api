@@ -2,7 +2,7 @@ from typing import List
 from sqlalchemy import and_
 from ..headlines.recent import retrieveHeadlineData
 from ..db.models import GenerateRelief, GeneratedInkind
-
+from util.generate_relief.rank import generated_relief_urgency
 WEEKS = 400
 
 def generated_relief(db, p, c):
@@ -28,11 +28,11 @@ def generated_relief(db, p, c):
                 })
 
             results.append(generated_data)
-
-    return results
+    return generated_relief_urgency(results)
 
 def dict_relief(data, relief):
     relief_data = {
+        "id": relief.id,
         "disaster_type": data.disaster_type,
         "relief_title": relief.relief_title,
         "description": relief.description,
