@@ -137,7 +137,9 @@ class ReliefEffort(Base):
     account_number = Column(String(100))
     money_platform = Column(String(200))
     deployment_date = Column(Date)
-
+    is_accepting_inkind = Column(Boolean, server_default=text("true"))
+    is_accepting_volunteers = Column(Boolean, server_default=text("true"))
+    is_accepting_money = Column(Boolean, server_default=text("true"))
 
 class ReliefPaymentKey(Base):
     __tablename__ = 'relief_payment_keys'
