@@ -36,6 +36,19 @@ class ReliefEffortRetrievalDTO(BaseModel):
 
 valid_needs = ['Monetary', 'Inkind', 'Volunteer Work']
 
+def count_total_reliefs():
+    reliefs_total = 0
+
+    with engine.connect() as con:
+        rs = con.execute(f"SELECT \
+                            COUNT(rls.name) \
+                            FROM relief_efforts rls \
+                            WHERE rls.is_active = true")
+        for row in rs:
+            reliefs_total = row
+    
+    return reliefs_total
+
 @router.get("/")
 def retrieve_releief_efforts(keyword:str = "", category:str = "", location:str = "", needs:Annotated[list[str] | None, Query()] = ['Monetary', 'Inkind', 'Volunteer Work'], p: int = 1, c: int = 10):
     """
@@ -43,6 +56,7 @@ def retrieve_releief_efforts(keyword:str = "", category:str = "", location:str =
     """
     print(needs)
     to_return = []
+    final_to_return = []
     
     detail_query = and_(ReliefEffort.is_active == True, ReliefEffort.disaster_type.contains(category), ReliefEffort.name.contains(keyword))
     
@@ -98,7 +112,12 @@ def retrieve_releief_efforts(keyword:str = "", category:str = "", location:str =
     else:
         to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query)).limit(c).offset((p-1)*c).all()
     
-    return to_return
+    final_to_return = {
+        "count" : count_total_reliefs(),
+        "reliefs" : to_return
+    }
+
+    return final_to_return
 
 def get_inkind_requirements_total(relief_id:int):
     inkind_requirements = []
