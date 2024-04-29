@@ -62,6 +62,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     return {
         "access_token": create_access_token(user.username, user.level),
         "refresh_token": create_refresh_token(user.username, user.level),
+        "user_id" : user.id
     }
 
 @router.post("/forgot-password")

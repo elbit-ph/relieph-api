@@ -32,73 +32,107 @@ class ReliefEffortRetrievalDTO(BaseModel):
     keyword: str = ""
     category: str = "all"
     location: str = ""
-    needs: List[str] = ['Monetary', 'Inkind', 'Volunteer Work']
+    needs: List[str] = ['monetary', 'inkind', 'volunteer']
 
-valid_needs = ['Monetary', 'Inkind', 'Volunteer Work']
+valid_needs = ['monetary', 'inkind', 'volunteer']
+
+def get_relief_effort_info(location:str, keyword:str = None, category:str = None, needs:List = []):
+
+    keyword_query = "%"
+    if keyword != None:
+        keyword_query = f"%%{keyword}%%"
+
+    if category == "" or category == None:
+        category = '%'
+
+    monetary_query = False  
+    inkind_query = False
+    volunteer_query = True
+    print(needs)
+    if 'monetary' in needs:
+        print(1)
+        monetary_query = True
+    
+    if 'inkind' in needs:
+        print(2)
+        inkind_query = True
+    
+    if 'volunteer' in needs:
+        print(3)
+        inkind_query = True
+
+    to_return = []
+
+    splitted_loc = location.split(', ')
+    if len(splitted_loc) != 2: splitted_loc = (None, None) 
+
+    with engine.connect() as con:
+            rs = con.execute(f"SELECT \
+                                re.id, \
+                                re.name, \
+                                re.description, \
+                                a.city, \
+                                a.region, \
+                                CASE \
+                                    WHEN re.owner_type = 'USER' THEN (SELECT u.username FROM users u WHERE re.owner_id = u.id) \
+                                    WHEN re.owner_type = 'ORGANIZATION' THEN (SELECT o.name FROM organizations o WHERE re.owner_id = o.id) \
+                                END AS organizer \
+                                FROM relief_efforts re \
+                                RIGHT JOIN addresses a \
+                                ON a.owner_id = re.id AND a.owner_type = 'RELIEF' \
+                                WHERE \
+                                    re.is_accepting_money = {monetary_query} \
+                                    AND re.is_accepting_inkind = {inkind_query} \
+                                    AND re.is_accepting_volunteers = {volunteer_query} \
+                                    AND re.name LIKE '{keyword_query}' \
+                                ")
+        
+    for row in rs:
+            # append image here
+            to_return.append({
+                'relief_id' : row[0],
+                'name' : row[1],
+                'description' : row[2],
+                'organizer' : row[5],
+                'city' : row[3],
+                'region' : row[4]
+            })
+
+    return to_return
 
 @router.get("/")
-def retrieve_releief_efforts(keyword:str = "", category:str = "", location:str = "", needs:Annotated[list[str] | None, Query()] = ['Monetary', 'Inkind', 'Volunteer Work'], p: int = 1, c: int = 10):
+async def retrieve_relief_efforts(keyword:str = "", category:str = "", location:str = "", needs:Annotated[list[str] | None, Query()] = ['monetary', 'inkind', 'volunteerx         '], p: int = 1, c: int = 10):
     """
     Retrieves relief efforts. Paginated by count `c` and page `p`. Note: to submit multiple needs, do so by adding multiple `needs` query parameters.
     """
-    print(needs)
-    to_return = []
+
+    # query used for address
+    address_query = None
+    splitted_loc = location.split(', ')
+    if len(splitted_loc) != 2: splitted_loc = None
     
+    # query used for getting user info 
     detail_query = and_(ReliefEffort.is_active == True, ReliefEffort.disaster_type.contains(category), ReliefEffort.name.contains(keyword))
     
-    address_query = None
+    to_return = get_relief_effort_info(keyword=keyword,
+                                       category=category,
+                                       location=location,
+                                       needs=needs )
+    # check result location
 
-    splitted_loc = location.split(', ')
-
-    if len(splitted_loc) == 2:
-        address_query = and_(Address.owner_id == ReliefEffort.id, Address.city == splitted_loc[0], Address.region == splitted_loc[1])
-    else:
-        address_query = and_(Address.owner_id == ReliefEffort.id)
+    if splitted_loc is None:
+        return to_return
     
-    inkind_query = and_(InkindDonationRequirement.relief_id == ReliefEffort.id, InkindDonationRequirement.is_deleted == False)
-
-    vol_query = and_(VolunteerRequirement.relief_id == ReliefEffort.id, VolunteerRequirement.is_deleted == False)
-
-    if len(needs) < 3 or needs != valid_needs.sort():
-        # some needs
-        for i in range(0, len(needs)):
-            needs[i] = needs[i].lower()
-
-        match len(needs):
-            case 1:
-                match needs[0]:
-                    case 'monetary':
-                        # with monetary requirements
-                        to_return = db.query(ReliefEffort, Address).filter(or_(ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
-                    case 'inkind':
-                        # with inkind requirements
-                        to_return = db.query(ReliefEffort, Address).join(InkindDonationRequirement, InkindDonationRequirement.relief_id == ReliefEffort.id).filter(and_(detail_query, address_query, inkind_query)).limit(c).offset((p-1)*c).all()
-                    case 'volunteer work':
-                        # with volunteer requirements
-                        to_return = db.query(ReliefEffort, Address).join(VolunteerRequirement, VolunteerRequirement.relief_id == ReliefEffort.id).filter(and_(detail_query, address_query, vol_query)).limit(c).offset((p-1)*c).all()
-                    case _:
-                        to_return = []
-            case 2:
-                needs.sort()
-                match needs:
-                    case ['inkind', 'monetary']:
-                        # with inkind and monetary requirements
-                        to_return = db.query(ReliefEffort, Address, InkindDonationRequirement).filter(and_(detail_query, address_query, inkind_query, ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
-                    case ['monetary', 'volunteer work']:
-                        # with monetary and volunteer requirements
-                        to_return = db.query(ReliefEffort, Address, VolunteerRequirement).filter(and_(detail_query, address_query, vol_query, ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
-                    case ['inkind', 'volunteer work']:
-                        # with inkind and volunteer requirements
-                        to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query, ReliefEffort.monetary_goal == 0)).limit(c).offset((p-1)*c).all()
-                    case _:
-                        to_return = []
-            case _:
-                # all
-                to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query)).limit(c).offset((p-1)*c).all()
-    else:
-        to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query)).limit(c).offset((p-1)*c).all()
+    filtered_by_loc = []
+    print(splitted_loc)
+    for relief in to_return:
+        if relief['city'] == splitted_loc[0] and relief['region'] == splitted_loc[1]:
+            image = await file_handler.retrieve_files(relief['relief_id'], 'relief-efforts/main')
+            if image[1] == True:
+                relief['images'] = image[0]
+            filtered_by_loc.append(relief)
     
-    return to_return
+    return filtered_by_loc
 
 def get_inkind_requirements_total(relief_id:int):
     inkind_requirements = []
@@ -109,6 +143,7 @@ def get_inkind_requirements_total(relief_id:int):
                             idr.description,\
                             idr.count AS target,\
                             idr.count - (SELECT COUNT(*) FROM inkind_donations id WHERE id.inkind_requirement_id = idr.id AND id.status = 'DELIVERED') AS count\
+                                \
                             FROM inkind_donation_requirements idr\
                             WHERE idr.relief_id = {relief_id}")
 
@@ -170,14 +205,16 @@ def get_comments_list(relief_id:int):
     with engine.connect() as con:
         rs = con.execute(f"SELECT \
                             cmt.user_id, \
-                            cmt.message \
+                            cmt.message, \
+                            cmt.created_at \
                             FROM relief_comments cmt \
                             WHERE cmt.relief_id = {relief_id} AND is_deleted = false")
         
         for row in rs:
             comments_list.append({
                 'user_id' : row[0],
-                'message' : row[1]
+                'message' : row[1],
+                'created_at' : row[2]
             })
 
         return comments_list
@@ -191,7 +228,8 @@ def get_updates_list(relief_id:int):
                             upd.title, \
                             upd.description, \
                             upd.media_dir, \
-                            upd.type \
+                            upd.type, \
+                            upd.created_at \
                             FROM relief_updates upd \
                             WHERE upd.relief_id = {relief_id} AND is_deleted = false")
         
@@ -200,7 +238,8 @@ def get_updates_list(relief_id:int):
                 'title' : row[0],
                 'description' : row[1],
                 'media_dir' : row[2],
-                'type' : row[3]
+                'type' : row[3],
+                'created_at' : row[4]
             })
 
         return updates_list
@@ -252,7 +291,7 @@ async def retrieve_relief_effort(relief_effort_id:int):
     resu = await file_handler.retrieve_files(relief_effort_id, f'relief-efforts/main')
     
     # contact_info = get_organizer_contact_info(relief.owner_id, relief.owner_type)
-    contact_info = None
+    contact_info = get_organizer_contact_info(relief.owner_id, relief.owner_type)
 
     address = db.query(Address).filter(and_(Address.owner_id == relief_effort_id, Address.owner_type == 'RELIEF')).all()
     inkind_requirements =  db.query(InkindDonationRequirement).filter(and_(InkindDonationRequirement.relief_id == relief.id, InkindDonationRequirement.is_deleted == False)).all()
