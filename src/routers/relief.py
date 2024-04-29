@@ -2,7 +2,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Form, Query
 from dependencies import get_current_user
 from services.db.database import Session, engine
-from services.db.models import Organization, User, Address, ReliefEffort, ReliefBookmark, ReliefComment, InkindDonationRequirement, InkindDonation, VolunteerRequirement, ReliefUpdate
+from services.db.models import Organization, User, Address, ReliefEffort, ReliefBookmark, ReliefComment, InkindDonationRequirement, InkindDonation, VolunteerRequirement, ReliefUpdate, ReceivedMoney
 from services.storage.file_handler import FileHandler
 from services.email.relief_email_handler import ReliefEmailHandler
 from models.auth_details import AuthDetails
@@ -205,6 +205,36 @@ def get_updates_list(relief_id:int):
 
         return updates_list
 
+def get_organizer_contact_info(owner_id:int, owner_type:str):
+    if owner_type == 'USER':
+        user:User = db.query(User).filter(and_(User.id == owner_id)).first()
+        # check if user exists
+        if user is None:
+            return None
+        
+        return {
+            "email" : user.email,
+            "mobile" : user.mobile,
+            "foundation_id" : user.sponsor_id
+        }
+    elif owner_type == 'ORGANIZATION':
+        organization:Organization = db.query(Organization).filter(and_(Organization.id == owner_id, Organization.is_deleted == False)).first()
+
+        # check if organization exists
+        user:User = db.query(User).filter(and_(User.id == owner_id)).first()
+        
+        return {
+            "email" : user.email,
+            "mobile" : user.mobile
+        }
+
+    else:
+        return None
+
+def get_current_inkind_donations(relief_effort_id:int):
+    
+    return
+
 @router.get("/{relief_effort_id}")
 async def retrieve_relief_effort(relief_effort_id:int):
     """
@@ -220,11 +250,26 @@ async def retrieve_relief_effort(relief_effort_id:int):
         )
 
     resu = await file_handler.retrieve_files(relief_effort_id, f'relief-efforts/main')
+    
+    # contact_info = get_organizer_contact_info(relief.owner_id, relief.owner_type)
+    contact_info = None
+
+    address = db.query(Address).filter(and_(Address.owner_id == relief_effort_id, Address.owner_type == 'RELIEF')).all()
+    inkind_requirements =  db.query(InkindDonationRequirement).filter(and_(InkindDonationRequirement.relief_id == relief.id, InkindDonationRequirement.is_deleted == False)).all()
+    volunteer_requirements = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.relief_id == relief.id, InkindDonationRequirement.is_deleted == False)).all()
+    monetary_donations:List[ReceivedMoney] = db.query(ReceivedMoney).filter(ReceivedMoney.relief_id == relief.id).all()
+
+    total_donation = 0
+    for m in monetary_donations:
+        total_donation += m.amount
 
     to_return = {
             'profile' : relief,
-            'inkindDonations' : get_inkind_total(relief.id),
-            'volunteerRequirements' : get_volunteer_requirements_total(relief.id),
+            "contact_info" : contact_info,
+            "address" : address,
+            "inkind_requirements" : inkind_requirements,
+            "volunteer_requirements" : volunteer_requirements,
+            "total_donation" : total_donation,
             'comment_list' : get_comments_list(relief.id),
             'update_list' : get_updates_list(relief.id)
     }

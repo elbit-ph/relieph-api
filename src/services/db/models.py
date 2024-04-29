@@ -74,6 +74,7 @@ class InkindDonationRequirement(Base):
     name = Column(String(150), nullable=False)
     description = Column(String(250))
     count = Column(Integer, server_default=text("0"))
+    total = Column(Integer)
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
@@ -211,7 +212,6 @@ class User(Base):
     sponsor_id = Column(Integer)
     is_verified = Column(Boolean, nullable=False, server_default=text("false"))
 
-
 class VerificationCode(Base):
     __tablename__ = 'verification_codes'
 
@@ -231,6 +231,7 @@ class VolunteerRequirement(Base):
     name = Column(String(150), nullable=False)
     description = Column(String(250))
     count = Column(Integer, server_default=text("0"))
+    total = Column(Integer)
     duration_days = Column(Integer, server_default=text("1"))
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
