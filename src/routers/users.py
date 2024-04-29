@@ -75,7 +75,7 @@ async def retrieve_users(p: int = 1, c: int = 10):
     
     # initialize array of users
     to_return = []
-    
+
     # iterate and only select necessary data from each user
     for user in users:
         profile_link = await file_handler.get_user_profile(user.id)
@@ -96,7 +96,7 @@ async def retrieve_user(id:int):
     """
     Retrieves a particular user, identified by `id`.
     """
-
+    print(id)
     # finds user
     user:User = db.query(User).filter(and_(User.id == id, User.is_deleted == False)).first()
 

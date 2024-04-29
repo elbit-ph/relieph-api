@@ -1,5 +1,5 @@
 # coding: utf-8
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, text, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -119,7 +119,7 @@ class ReliefComment(Base):
 class ReliefEffort(Base):
     __tablename__ = 'relief_efforts'
 
-    id = Column(Integer, primary_key=True, server_default=text("nextval('relief_efforts_id_seq'::regclass)"))
+    id = Column(BigInteger, primary_key=True, server_default=text("nextval('relief_efforts_id_seq'::regclass)"))
     owner_id = Column(Integer, nullable=False)
     owner_type = Column(String(50), nullable=False)
     disaster_type = Column(String(80), nullable=False)
@@ -197,7 +197,7 @@ class UserUpgradeRequest(Base):
 class User(Base):
     __tablename__ = 'users'
 
-    id = Column(Integer, primary_key=True, server_default=text("nextval('users_id_seq'::regclass)"))
+    id = Column(BigInteger, primary_key=True, server_default=text("nextval('users_id_seq'::regclass)"))
     first_name = Column(String(255), server_default=text("NULL::character varying"))
     last_name = Column(String(255), server_default=text("NULL::character varying"))
     username = Column(String(255), nullable=False)

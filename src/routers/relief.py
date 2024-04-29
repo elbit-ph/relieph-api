@@ -6,7 +6,7 @@ from services.db.models import Organization, User, Address, ReliefEffort, Relief
 from services.storage.file_handler import FileHandler
 from services.email.relief_email_handler import ReliefEmailHandler
 from models.auth_details import AuthDetails
-from util.auth.auth_tool import authorize
+from util.auth.auth_tool import authorize, is_user_organizer, is_authorized
 from util.files.image_validator import is_image_valid
 from pydantic import BaseModel
 from datetime import datetime, date
@@ -181,7 +181,6 @@ def get_comments_list(relief_id:int):
             })
 
         return comments_list
-    
 
 def get_updates_list(relief_id:int):
 
@@ -248,8 +247,8 @@ class ReliefAddressDTO(BaseModel):
 # volunteer reuqirement: name, count
 
 class InkindRequirementDTO(BaseModel):
-    name:str
-    count:int
+    name:str = Form()
+    count:int = Form()
 
 class VolunteerRequirementDTO(BaseModel):
     name:str
@@ -261,21 +260,22 @@ class CreateReliefEffortDTO(BaseModel):
     description: str
     disaster_type: str
     # address
-    address:ReliefAddressDTO
+    address : ReliefAddressDTO
     # dates
-    start_date: date
-    deployment_date: date
-    end_date: date
+    start_date: str
+    deployment_date: str
+    end_date: str
     # monetary goal & account details
     monetary_goal: float
     accountno: str
     platform: str
-    inkind_requirements: List[InkindRequirementDTO]
-    volunteer_requirements: List[VolunteerRequirementDTO]
-    sponsor_message: str = None
+
+    inkind_requirements: List[InkindRequirementDTO] = None
+    volunteer_requirements: List[VolunteerRequirementDTO] = None
+    sponsor_message: str  = None
 
 @router.post("/as-user")
-async def create_relief_effort_as_individual(res: Response, body: CreateReliefEffortDTO = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+async def create_relief_effort_as_individual(res: Response, body: CreateReliefEffortDTO, user: AuthDetails = Depends(get_current_user)):
     """
     Creates relief effort as a user.
     """
@@ -294,9 +294,9 @@ async def create_relief_effort_as_individual(res: Response, body: CreateReliefEf
         }
     
     # check if all images are valid
-    for image in images:
-        if is_image_valid(image) == False:
-            return {"detail" : "One of uploaded files are invalid."}
+    # for image in images:
+    #     if is_image_valid(image) == False:
+    #         return {"detail" : "One of uploaded files are invalid."}
         
     # save basic info
     relief:ReliefEffort = ReliefEffort()
@@ -319,11 +319,11 @@ async def create_relief_effort_as_individual(res: Response, body: CreateReliefEf
     # save images
 
     # upload pictures to their own folder
-    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/main')
+    # resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/main')
 
-    if resu[1] == False:
-        # do not terminate outright
-        print(f'Images for relief id {relief.id} not uploaded.')
+    # if resu[1] == False:
+    #     # do not terminate outright
+    #     print(f'Images for relief id {relief.id} not uploaded.')
     
     # save address
     address = Address()
@@ -349,7 +349,7 @@ async def create_relief_effort_as_individual(res: Response, body: CreateReliefEf
         inkind_requirement.count = i_r.count
         inkind_requirement.relief_id = relief.id
         inkind_requirement_list.append(inkind_requirement)
-    if inkind_requirement_list.count() > 0:
+    if len(inkind_requirement_list) > 0:
         db.add_all(inkind_requirement_list)
     
     # volunteer requirement
@@ -364,15 +364,19 @@ async def create_relief_effort_as_individual(res: Response, body: CreateReliefEf
         volunteer_requirement.relief_id = relief.id
         volunter_requirement_list.append(volunteer_requirement)
 
-    if volunter_requirement_list.count() > 0:
+    if len(volunter_requirement_list) > 0:
         db.add_all(volunter_requirement_list)
 
     db.commit()
 
-    return {"detail": "Relief effort successfully created"}
+    return {
+            "detail": "Relief effort successfully created",
+            "data" : {
+                "relief_id" : relief.id
+            }}
 
-@router.post("/as-organization/{id}")
-async def create_relief_effort_as_organization(res: Response, id: int, body: CreateReliefEffortDTO = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+@router.post("/as-organization/{organization_id}")
+async def create_relief_effort_as_organization(res: Response, organization_id: int, body: CreateReliefEffortDTO, user: AuthDetails = Depends(get_current_user)):
     """
     Create relief effort as an organization.
     """
@@ -384,7 +388,7 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Cre
     body.deployment_date = date.fromisoformat(body.deployment_date)
     body.end_date = date.fromisoformat(body.end_date)
 
-    org: Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False, Organization.is_active == True)).first()
+    org: Organization = db.query(Organization).filter(and_(Organization.id == organization_id, Organization.is_deleted == False, Organization.is_active == True)).first()
 
     # if org is not found, return HTTP 404
     if org is None:
@@ -403,12 +407,8 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Cre
             "detail" : "Invalid date input."
         }
     
-    for image in images:
-        if is_image_valid(image) == False:
-            return {"detail" : "One of uploaded files are invalid."}
-    
     relief:ReliefEffort = ReliefEffort()
-    relief.owner_id = id
+    relief.owner_id = organization_id
     relief.owner_type = 'ORGANIZATION'
     relief.name = body.name
     relief.description = body.description
@@ -423,13 +423,6 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Cre
 
     db.add(relief)
     db.commit()
-
-    # upload images files
-    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/main')
-
-    if resu[1] == False:
-        # do not terminate outright
-        print(f'Images for relief id {relief.id} not uploaded.')
     
     # save address
     address = Address()
@@ -482,7 +475,40 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Cre
     db.add(relief)
     db.commit()
 
-    return {"detail": "Relief effort successfully created"}
+    return {"detail": "Relief effort successfully created", 
+            "data" : {
+                "organization_id" : organization_id
+            }}
+
+@router.post("/{relief_id}/images")
+async def upload_relief_images(relief_id:int, res:Response, images:List[UploadFile] = File(...), user:AuthDetails = Depends(get_current_user)):
+    # check if images are valid
+    for image in images:
+        if is_image_valid(image) == False:
+            res.status_code = 404
+            return {'detail' : 'Invalid image type in one or more images uploaded.'}
+    
+    relief_effort:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == relief_id, ReliefEffort.is_deleted == False)).first()
+
+    # check if relief effort exists
+    if relief_effort is None:
+        res.status_code = 404
+        return {'detail' : 'Relief effort not found.'}
+    
+    # check if user can act on behalf of relief effort
+    if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user) == False:
+        res.status_code = 403
+        return {'detail': 'Not authorized to affect on behalf of relief effort.'}
+
+    # upload images
+    resu = await file_handler.upload_multiple_file(images, relief_id, 'relief-efforts/main')
+
+    # check if upload was successful
+    if resu[1] == False:
+        res.status_code = 500
+        return {'detail' : 'Unable to upload images.'}
+    
+    return {'detail' : 'Images uploaded.'}
 
 @router.patch("/{id}/approve")
 async def approveReliefEffort(id:int, res: Response, user: AuthDetails = Depends(get_current_user)):
@@ -793,16 +819,15 @@ class CreateUpdateDTO(BaseModel):
     type: str = None
 
 @router.post("/{id}/updates")
-async def create_update(id:int, res:Response, body: CreateUpdateDTO = Form(), images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
+async def create_update(id:int, res:Response, body: CreateUpdateDTO, user: AuthDetails = Depends(get_current_user)):
     """
     Create update for relief `id`
     """
 
-    # check user authorization
     authorize(user, 2, 4)
     
     # check if relief exists
-    relief:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == id, ReliefEffort.is_active == True)).first()
+    relief:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == id, ReliefEffort.is_active == False)).first()
 
     # checks if relief exists
     if relief is None:
@@ -838,12 +863,6 @@ async def create_update(id:int, res:Response, body: CreateUpdateDTO = Form(), im
             res.status_code = 400
             return {"detail" : "Invalid owner type"}
     
-    # validate images
-    for image in images:
-        if is_image_valid(image) == False:
-            res.status_code = 400
-            return {"detail" : "One of uploaded files are invalid."}
-    
     # instantiate relief effort
     update: ReliefUpdate = ReliefUpdate()
 
@@ -855,10 +874,49 @@ async def create_update(id:int, res:Response, body: CreateUpdateDTO = Form(), im
     db.add(update)
     db.commit()
 
-    # add images
-    await file_handler.upload_multiple_file(images, id, f'relief-efforts/{id}/updates/{update.id}')
+    return {"detail": "Successfully created update.",
+            "data" : {
+                "relief_id" : relief.id,
+                "update_id" : update.id
+            }}
 
-    return {"detail": "Successfully created update."}
+@router.post('/{relief_id}/updates/{update_id}')
+async def upload_update_images(update_id:int, relief_id:int, res:Response, images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
+    authorize(user, 2, 4)
+
+    # check if images are valid
+    for image in images:
+        if is_image_valid(image) == False:
+            res.status_code = 400
+            return {'detail' : 'One or more of the images uploaded have invalid file formats.'}
+    
+    relief_effort:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == relief_id, ReliefEffort.is_deleted == False)).first()
+
+    # check if relief exists    
+    if relief_effort is None:
+        res.status_code = 404
+        return {'detail' : 'Relief effort non-existent'}
+    
+    relief_update = db.query(ReliefUpdate).filter(and_(ReliefUpdate.id == update_id, ReliefUpdate.is_deleted == False)).first()
+
+    # check if update exists
+    if relief_update is None:
+        res.status_code = 404
+        return {'detail': 'Relief update non-existing'}
+
+    # check if user is authorized to act on behalf
+    if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user) == False:
+        res.status_code = 403
+        return {'detail' : 'Unable to act on behalf of relief effort.'}
+    
+    # add images
+    resu = await file_handler.upload_multiple_file(images, update_id, 'relief-efforts/updates')
+
+    if resu[1] == False:
+        res.status_code = 500
+        return {'detail' : 'Unable to upload images'}
+    
+    return {'detail': 'Successfully uploaded images to relief update.'} 
 
 class ReliefUpdateStatusDTO(BaseModel):
     owner_type: str
