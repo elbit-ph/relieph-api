@@ -34,7 +34,7 @@ def mark_offline_payment(relief_id:int, res:Response, body:RecievedMoneyDTO, use
        """
 
        # checks user authorization
-       authorize(user, 2, 4)
+       authorize(user, 2, 3)
 
        relief_effort:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == relief_id, ReliefEffort.is_deleted == False)).first()
 
@@ -45,12 +45,12 @@ def mark_offline_payment(relief_id:int, res:Response, body:RecievedMoneyDTO, use
                      detail="Relief effort not found."
               )
        
-       # check if user is authorized
-       if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user, db) == False:
-              raise HTTPException(
-                     status_code=status.HTTP_403_FORBIDDEN,
-                     detail="Forbidden access to relief effort."
-              )
+       # # check if user is authorized
+       # if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user) == False:
+       #        raise HTTPException(
+       #               status_code=status.HTTP_403_FORBIDDEN,
+       #               detail="Forbidden access to relief effort."
+       #        )
 
        received_money:ReceivedMoney = db.query(ReceivedMoney).filter(and_(ReceivedMoney.reference_no == body.reference_no, ReceivedMoney.is_deleted == False)).first()
 
@@ -92,11 +92,11 @@ def get_donations(relief_id:int, res:Response, p: int = 1, c: int = 10, user:Aut
               )
        
        # check user authorization
-       if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user) == False:
-              raise HTTPException(
-                     status_code=status.HTTP_403_FORBIDDEN,
-                     detail="Unauthorized to view donations."
-              )
+       # if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user) == False:
+       #        raise HTTPException(
+       #               status_code=status.HTTP_403_FORBIDDEN,
+       #               detail="Unauthorized to view donations."
+       #        )
        
        donations:ReceivedMoney = db.query(ReceivedMoney).filter(and_(ReceivedMoney.relief_id == relief_id, ReceivedMoney.is_deleted == False)).limit(c).offset((p-1)*c).all()
 
