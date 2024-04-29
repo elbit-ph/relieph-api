@@ -149,6 +149,7 @@ async def reset_password(body:PasswordResetModel, response:Response):
 
 GOOGLE_CLIENT_ID =  os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")
 
 @router.get("/login/google")
 async def login_google():

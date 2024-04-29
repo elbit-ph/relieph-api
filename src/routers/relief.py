@@ -122,6 +122,25 @@ def get_inkind_requirements_total(relief_id:int):
 
     return inkind_requirements
 
+def get_inkind_total(relief_id:int):
+    
+    inkind_donations = []
+
+    with engine.connect() as con:
+        rs = con.execute(f"SELECT \
+                            ink.quantity, \
+                            ink.expiry, \
+                            FROM inkind_donations ink \
+                            WHERE ink.relief_id = {relief_id}")
+        
+    for row in rs:
+        inkind_donations.append({
+            'quantity': row[0],
+            'expiry': row[1]
+        })
+    
+    return inkind_donations
+
 def get_volunteer_requirements_total(relief_id:int):
 
     volunteer_requirements = []
@@ -144,6 +163,49 @@ def get_volunteer_requirements_total(relief_id:int):
 
     return volunteer_requirements
 
+def get_comments_list(relief_id:int):
+
+    comments_list = []
+
+    with engine.connect() as con:
+        rs = con.execute(f"SELECT \
+                            cmt.user_id, \
+                            cmt.message \
+                            FROM relief_comments cmt \
+                            WHERE cmt.relief_id = {relief_id} AND is_deleted = false")
+        
+        for row in rs:
+            comments_list.append({
+                'user_id' : row[0],
+                'message' : row[1]
+            })
+
+        return comments_list
+    
+
+def get_updates_list(relief_id:int):
+
+    updates_list = []
+
+    with engine.connect() as con:
+        rs = con.execute(f"SELECT \
+                            upd.title, \
+                            upd.description, \
+                            upd.media_dir, \
+                            upd.type \
+                            FROM relief_updates upd \
+                            WHERE upd.relief_id = {relief_id} AND is_deleted = false")
+        
+        for row in rs:
+            updates_list.append({
+                'title' : row[0],
+                'description' : row[1],
+                'media_dir' : row[2],
+                'type' : row[3]
+            })
+
+        return updates_list
+
 @router.get("/{relief_effort_id}")
 async def retrieve_relief_effort(relief_effort_id:int):
     """
@@ -153,7 +215,7 @@ async def retrieve_relief_effort(relief_effort_id:int):
 
     # checks if relief effort exists
     if relief is None:
-        raise HTTPException(
+        raise HTTPException( 
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found."
         )
@@ -162,8 +224,10 @@ async def retrieve_relief_effort(relief_effort_id:int):
 
     to_return = {
             'profile' : relief,
-            'inkindRequirements' : get_inkind_requirements_total(relief.id),
-            'volunteerRequirements' : get_volunteer_requirements_total(relief.id)
+            'inkindDonations' : get_inkind_total(relief.id),
+            'volunteerRequirements' : get_volunteer_requirements_total(relief.id),
+            'comment_list' : get_comments_list(relief.id),
+            'update_list' : get_updates_list(relief.id)
     }
 
     # retrieve monetary progress

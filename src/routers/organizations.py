@@ -33,7 +33,7 @@ class OrganizationAddressDTO(BaseModel):
     city:str
     brgy:str
     street:str
-    zipcode:str
+    zipcode:int
     coordinates:str
 
 @router.get("/")
@@ -186,12 +186,12 @@ def edit_organization_address(id:int, body:OrganizationAddressDTO, res:Response,
     # retrieve address
     address:Address = db.query(Address).filter(Address.owner_type == 'ORGANIZATION' and Address.owner_id == id).first()
     
-    address.region = address.region if body.region is "" else body.region
-    address.city = address.city if body.city is "" else body.city
-    address.brgy = address.brgy if body.brgy is "" else body.brgy
-    address.street = address.street if body.street is "" else body.street
-    address.zipcode = address.zipcode if body.zipcode is "" else body.zipcode
-    address.coordinates = address.coordinates if body.coordinates is "" else body.coordinates
+    address.region = address.region if body.region == "" else body.region
+    address.city = address.city if body.city == "" else body.city
+    address.brgy = address.brgy if body.brgy == "" else body.brgy
+    address.street = address.street if body.street == "" else body.street
+    address.zipcode = address.zipcode if body.zipcode == "" else body.zipcode
+    address.coordinates = address.coordinates if body.coordinates == "" else body.coordinates
     address.updated_at = datetime.now()
 
     db.commit()
