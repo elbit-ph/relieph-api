@@ -122,14 +122,14 @@ def get_inkind_requirements_total(relief_id:int):
 
     return inkind_requirements
 
-def get_inkind_total(relief_id:int):
+def get_inkind_total(relief_id: int):
     
     inkind_donations = []
 
     with engine.connect() as con:
         rs = con.execute(f"SELECT \
                             ink.quantity, \
-                            ink.expiry, \
+                            ink.expiry \
                             FROM inkind_donations ink \
                             WHERE ink.relief_id = {relief_id}")
         
@@ -756,7 +756,7 @@ def get_comments(id:int, res:Response):
     """
     Retrieves comments of a relief effort
     """
-    comments = db.query(ReliefComment).filter(ReliefComment.id == id).all()
+    comments = db.query(ReliefComment).filter(ReliefEffort.id == id).all()
     return comments
 
 class ReliefCommentDTO(BaseModel):
