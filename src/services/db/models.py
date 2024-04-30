@@ -1,5 +1,5 @@
 # coding: utf-8
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, text, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -35,7 +35,36 @@ class Headline(Base):
     posted_datetime = Column(DateTime(True), nullable=False)
     created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
+    article = Column(Text, nullable=False)
 
+
+class GenerateRelief(Base):
+    __tablename__ = 'generated_relief'
+
+    id = Column(Integer, primary_key=True, server_default=text("nextval('generated_relief_id_seq'::regclass)"))
+    headline_id = Column(ForeignKey('headlines.id'), nullable=False)
+    relief_title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    monetary_goal = Column(Numeric, server_default=text("0.00"))
+    deployment_date = Column(Date, nullable=False)
+    is_used = Column(Boolean, nullable=False, server_default=text("false"))
+    created_at = Column(DateTime(True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(True))
+
+    headline = relationship('Headline')
+
+
+class GeneratedInkind(Base):
+    __tablename__ = 'generated_inkind'
+    
+    id = Column(Integer, primary_key=True, server_default=text("nextval('generated_inkind_id_seq'::regclass)"))   
+    generated_relief_id = Column(ForeignKey('generated_relief.id'), nullable=False)
+    item = Column(String(255), nullable=False)
+    item_desc = Column(String(255), nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+    generated_relief = relationship('GenerateRelief')
+    
 
 class InkindDonationRequirement(Base):
     __tablename__ = 'inkind_donation_requirements'
@@ -45,6 +74,7 @@ class InkindDonationRequirement(Base):
     name = Column(String(150), nullable=False)
     description = Column(String(250))
     count = Column(Integer, server_default=text("0"))
+    total = Column(Integer)
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(True))
@@ -90,7 +120,7 @@ class ReliefComment(Base):
 class ReliefEffort(Base):
     __tablename__ = 'relief_efforts'
 
-    id = Column(Integer, primary_key=True, server_default=text("nextval('relief_efforts_id_seq'::regclass)"))
+    id = Column(BigInteger, primary_key=True, server_default=text("nextval('relief_efforts_id_seq'::regclass)"))
     owner_id = Column(Integer, nullable=False)
     owner_type = Column(String(50), nullable=False)
     disaster_type = Column(String(80), nullable=False)
@@ -107,7 +137,9 @@ class ReliefEffort(Base):
     account_number = Column(String(100))
     money_platform = Column(String(200))
     deployment_date = Column(Date)
-
+    is_accepting_inkind = Column(Boolean, server_default=text("true"))
+    is_accepting_volunteers = Column(Boolean, server_default=text("true"))
+    is_accepting_money = Column(Boolean, server_default=text("true"))
 
 class ReliefPaymentKey(Base):
     __tablename__ = 'relief_payment_keys'
@@ -168,7 +200,7 @@ class UserUpgradeRequest(Base):
 class User(Base):
     __tablename__ = 'users'
 
-    id = Column(Integer, primary_key=True, server_default=text("nextval('users_id_seq'::regclass)"))
+    id = Column(BigInteger, primary_key=True, server_default=text("nextval('users_id_seq'::regclass)"))
     first_name = Column(String(255), server_default=text("NULL::character varying"))
     last_name = Column(String(255), server_default=text("NULL::character varying"))
     username = Column(String(255), nullable=False)
@@ -181,7 +213,6 @@ class User(Base):
     updated_at = Column(DateTime(True))
     sponsor_id = Column(Integer)
     is_verified = Column(Boolean, nullable=False, server_default=text("false"))
-
 
 class VerificationCode(Base):
     __tablename__ = 'verification_codes'
@@ -202,6 +233,7 @@ class VolunteerRequirement(Base):
     name = Column(String(150), nullable=False)
     description = Column(String(250))
     count = Column(Integer, server_default=text("0"))
+    total = Column(Integer)
     duration_days = Column(Integer, server_default=text("1"))
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(True), server_default=text("CURRENT_TIMESTAMP"))

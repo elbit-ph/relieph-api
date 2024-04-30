@@ -1,21 +1,22 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Form
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, Form, Query
 from dependencies import get_current_user
 from services.db.database import Session, engine
-from services.db.models import Organization, User, Address, ReliefEffort, ReliefBookmark, ReliefComment, InkindDonationRequirement, InkindDonation, VolunteerRequirement, ReliefUpdate
+from services.db.models import Organization, User, Address, ReliefEffort, ReliefBookmark, ReliefComment, InkindDonationRequirement, InkindDonation, VolunteerRequirement, ReliefUpdate, ReceivedMoney
 from services.storage.file_handler import FileHandler
 from services.email.relief_email_handler import ReliefEmailHandler
 from models.auth_details import AuthDetails
-from util.auth.auth_tool import authorize
+from util.auth.auth_tool import authorize, is_user_organizer, is_authorized
 from util.files.image_validator import is_image_valid
 from pydantic import BaseModel
 from datetime import datetime, date
 from sqlalchemy import and_, or_, text
-from typing import List
-from pydantic import Json
+from typing import List, Optional, Literal
+from pydantic import Json, Field
 import json
 from types import SimpleNamespace
 from sqlalchemy import Integer, Column
+from enum import Enum
 
 router = APIRouter(
     prefix="/reliefs",
@@ -31,73 +32,107 @@ class ReliefEffortRetrievalDTO(BaseModel):
     keyword: str = ""
     category: str = "all"
     location: str = ""
-    needs: List[str] = ['Monetary', 'Inkind', 'Volunteer Work']
+    needs: List[str] = ['monetary', 'inkind', 'volunteer']
 
-valid_needs = ['Monetary', 'Inkind', 'Volunteer Work']
+valid_needs = ['monetary', 'inkind', 'volunteer']
 
-@router.get("/")
-def retrieve_releief_efforts(body:ReliefEffortRetrievalDTO, p: int = 1, c: int = 10):
-    """
-    Retrieves relief efforts. Paginated by count `c` and page `p`.
-    """
+def get_relief_effort_info(location:str, keyword:str = None, category:str = None, needs:List = []):
+
+    keyword_query = "%"
+    if keyword != None:
+        keyword_query = f"%%{keyword}%%"
+
+    if category == "" or category == None:
+        category = '%'
+
+    monetary_query = False  
+    inkind_query = False
+    volunteer_query = True
+    print(needs)
+    if 'monetary' in needs:
+        print(1)
+        monetary_query = True
+    
+    if 'inkind' in needs:
+        print(2)
+        inkind_query = True
+    
+    if 'volunteer' in needs:
+        print(3)
+        inkind_query = True
 
     to_return = []
-    
-    detail_query = and_(ReliefEffort.is_active == True, ReliefEffort.disaster_type.contains(body.category), ReliefEffort.name.contains(body.keyword))
-    
-    address_query = None
 
-    splitted_loc = body.location.split(', ')
+    splitted_loc = location.split(', ')
+    if len(splitted_loc) != 2: splitted_loc = (None, None) 
 
-    if len(splitted_loc) == 2:
-        address_query = and_(Address.owner_id == ReliefEffort.id, Address.city == splitted_loc[0], Address.region == splitted_loc[1])
-    else:
-        address_query = and_(Address.owner_id == ReliefEffort.id)
-    
-    inkind_query = and_(InkindDonationRequirement.relief_id == ReliefEffort.id, InkindDonationRequirement.is_deleted == False)
+    with engine.connect() as con:
+            rs = con.execute(f"SELECT \
+                                re.id, \
+                                re.name, \
+                                re.description, \
+                                a.city, \
+                                a.region, \
+                                CASE \
+                                    WHEN re.owner_type = 'USER' THEN (SELECT u.username FROM users u WHERE re.owner_id = u.id) \
+                                    WHEN re.owner_type = 'ORGANIZATION' THEN (SELECT o.name FROM organizations o WHERE re.owner_id = o.id) \
+                                END AS organizer \
+                                FROM relief_efforts re \
+                                RIGHT JOIN addresses a \
+                                ON a.owner_id = re.id AND a.owner_type = 'RELIEF' \
+                                WHERE \
+                                    re.is_accepting_money = {monetary_query} \
+                                    AND re.is_accepting_inkind = {inkind_query} \
+                                    AND re.is_accepting_volunteers = {volunteer_query} \
+                                    AND re.name LIKE '{keyword_query}' \
+                                ")
+        
+    for row in rs:
+            # append image here
+            to_return.append({
+                'relief_id' : row[0],
+                'name' : row[1],
+                'description' : row[2],
+                'organizer' : row[5],
+                'city' : row[3],
+                'region' : row[4]
+            })
 
-    vol_query = and_(VolunteerRequirement.relief_id == ReliefEffort.id, VolunteerRequirement.is_deleted == False)
-
-    if len(body.needs) < 3 or body.needs != valid_needs.sort():
-        # some needs
-        for i in range(0, len(body.needs)):
-            body.needs[i] = body.needs[i].lower()
-
-        match len(body.needs):
-            case 1:
-                match body.needs[0]:
-                    case 'monetary':
-                        # with monetary requirements
-                        to_return = db.query(ReliefEffort, Address).filter(or_(ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
-                    case 'inkind':
-                        # with inkind requirements
-                        to_return = db.query(ReliefEffort, Address).join(InkindDonationRequirement, InkindDonationRequirement.relief_id == ReliefEffort.id).filter(and_(detail_query, address_query, inkind_query)).limit(c).offset((p-1)*c).all()
-                    case 'volunteer work':
-                        # with volunteer requirements
-                        to_return = db.query(ReliefEffort, Address).join(VolunteerRequirement, VolunteerRequirement.relief_id == ReliefEffort.id).filter(and_(detail_query, address_query, vol_query)).limit(c).offset((p-1)*c).all()
-                    case _:
-                        to_return = []
-            case 2:
-                body.needs.sort()
-                match body.needs:
-                    case ['inkind', 'monetary']:
-                        # with inkind and monetary requirements
-                        to_return = db.query(ReliefEffort, Address, InkindDonationRequirement).filter(and_(detail_query, address_query, inkind_query, ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
-                    case ['monetary', 'volunteer work']:
-                        # with monetary and volunteer requirements
-                        to_return = db.query(ReliefEffort, Address, VolunteerRequirement).filter(and_(detail_query, address_query, vol_query, ReliefEffort.monetary_goal > 0)).limit(c).offset((p-1)*c).all()
-                    case ['inkind', 'volunteer work']:
-                        # with inkind and volunteer requirements
-                        to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query, ReliefEffort.monetary_goal == 0)).limit(c).offset((p-1)*c).all()
-                    case _:
-                        to_return = []
-            case _:
-                # all
-                to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query)).limit(c).offset((p-1)*c).all()
-    else:
-        to_return = db.query(ReliefEffort, Address).filter(and_(detail_query, address_query)).limit(c).offset((p-1)*c).all()
-    
     return to_return
+
+@router.get("/")
+async def retrieve_relief_efforts(keyword:str = "", category:str = "", location:str = "", needs:Annotated[list[str] | None, Query()] = ['monetary', 'inkind', 'volunteerx         '], p: int = 1, c: int = 10):
+    """
+    Retrieves relief efforts. Paginated by count `c` and page `p`. Note: to submit multiple needs, do so by adding multiple `needs` query parameters.
+    """
+
+    # query used for address
+    address_query = None
+    splitted_loc = location.split(', ')
+    if len(splitted_loc) != 2: splitted_loc = None
+    
+    # query used for getting user info 
+    detail_query = and_(ReliefEffort.is_active == True, ReliefEffort.disaster_type.contains(category), ReliefEffort.name.contains(keyword))
+    
+    to_return = get_relief_effort_info(keyword=keyword,
+                                       category=category,
+                                       location=location,
+                                       needs=needs )
+    # check result location
+
+    if splitted_loc is None:
+        return to_return
+    
+    filtered_by_loc = []
+    print(splitted_loc)
+    for relief in to_return:
+        if relief['city'] == splitted_loc[0] and relief['region'] == splitted_loc[1]:
+            image = await file_handler.retrieve_files(relief['relief_id'], 'relief-efforts/main')
+            if image[1] == True:
+                relief['images'] = image[0]
+            filtered_by_loc.append(relief)
+    
+    return filtered_by_loc
 
 def get_inkind_requirements_total(relief_id:int):
     inkind_requirements = []
@@ -108,6 +143,7 @@ def get_inkind_requirements_total(relief_id:int):
                             idr.description,\
                             idr.count AS target,\
                             idr.count - (SELECT COUNT(*) FROM inkind_donations id WHERE id.inkind_requirement_id = idr.id AND id.status = 'DELIVERED') AS count\
+                                \
                             FROM inkind_donation_requirements idr\
                             WHERE idr.relief_id = {relief_id}")
 
@@ -120,6 +156,25 @@ def get_inkind_requirements_total(relief_id:int):
             })
 
     return inkind_requirements
+
+def get_inkind_total(relief_id: int):
+    
+    inkind_donations = []
+
+    with engine.connect() as con:
+        rs = con.execute(f"SELECT \
+                            ink.quantity, \
+                            ink.expiry \
+                            FROM inkind_donations ink \
+                            WHERE ink.relief_id = {relief_id}")
+        
+    for row in rs:
+        inkind_donations.append({
+            'quantity': row[0],
+            'expiry': row[1]
+        })
+    
+    return inkind_donations
 
 def get_volunteer_requirements_total(relief_id:int):
 
@@ -143,6 +198,82 @@ def get_volunteer_requirements_total(relief_id:int):
 
     return volunteer_requirements
 
+def get_comments_list(relief_id:int):
+
+    comments_list = []
+
+    with engine.connect() as con:
+        rs = con.execute(f"SELECT \
+                            cmt.user_id, \
+                            cmt.message, \
+                            cmt.created_at \
+                            FROM relief_comments cmt \
+                            WHERE cmt.relief_id = {relief_id} AND is_deleted = false")
+        
+        for row in rs:
+            comments_list.append({
+                'user_id' : row[0],
+                'message' : row[1],
+                'created_at' : row[2]
+            })
+
+        return comments_list
+
+def get_updates_list(relief_id:int):
+
+    updates_list = []
+
+    with engine.connect() as con:
+        rs = con.execute(f"SELECT \
+                            upd.title, \
+                            upd.description, \
+                            upd.media_dir, \
+                            upd.type, \
+                            upd.created_at \
+                            FROM relief_updates upd \
+                            WHERE upd.relief_id = {relief_id} AND is_deleted = false")
+        
+        for row in rs:
+            updates_list.append({
+                'title' : row[0],
+                'description' : row[1],
+                'media_dir' : row[2],
+                'type' : row[3],
+                'created_at' : row[4]
+            })
+
+        return updates_list
+
+def get_organizer_contact_info(owner_id:int, owner_type:str):
+    if owner_type == 'USER':
+        user:User = db.query(User).filter(and_(User.id == owner_id)).first()
+        # check if user exists
+        if user is None:
+            return None
+        
+        return {
+            "email" : user.email,
+            "mobile" : user.mobile,
+            "foundation_id" : user.sponsor_id
+        }
+    elif owner_type == 'ORGANIZATION':
+        organization:Organization = db.query(Organization).filter(and_(Organization.id == owner_id, Organization.is_deleted == False)).first()
+
+        # check if organization exists
+        user:User = db.query(User).filter(and_(User.id == owner_id)).first()
+        
+        return {
+            "email" : user.email,
+            "mobile" : user.mobile
+        }
+
+    else:
+        return None
+
+def get_current_inkind_donations(relief_effort_id:int):
+    
+    return
+
 @router.get("/{relief_effort_id}")
 async def retrieve_relief_effort(relief_effort_id:int):
     """
@@ -152,17 +283,34 @@ async def retrieve_relief_effort(relief_effort_id:int):
 
     # checks if relief effort exists
     if relief is None:
-        raise HTTPException(
+        raise HTTPException( 
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found."
         )
 
     resu = await file_handler.retrieve_files(relief_effort_id, f'relief-efforts/main')
+    
+    # contact_info = get_organizer_contact_info(relief.owner_id, relief.owner_type)
+    contact_info = get_organizer_contact_info(relief.owner_id, relief.owner_type)
+
+    address = db.query(Address).filter(and_(Address.owner_id == relief_effort_id, Address.owner_type == 'RELIEF')).all()
+    inkind_requirements =  db.query(InkindDonationRequirement).filter(and_(InkindDonationRequirement.relief_id == relief.id, InkindDonationRequirement.is_deleted == False)).all()
+    volunteer_requirements = db.query(VolunteerRequirement).filter(and_(VolunteerRequirement.relief_id == relief.id, InkindDonationRequirement.is_deleted == False)).all()
+    monetary_donations:List[ReceivedMoney] = db.query(ReceivedMoney).filter(ReceivedMoney.relief_id == relief.id).all()
+
+    total_donation = 0
+    for m in monetary_donations:
+        total_donation += m.amount
 
     to_return = {
             'profile' : relief,
-            'inkindRequirements' : get_inkind_requirements_total(relief.id),
-            'volunteerRequirements' : get_volunteer_requirements_total(relief.id)
+            "contact_info" : contact_info,
+            "address" : address,
+            "inkind_requirements" : inkind_requirements,
+            "volunteer_requirements" : volunteer_requirements,
+            "total_donation" : total_donation,
+            'comment_list' : get_comments_list(relief.id),
+            'update_list' : get_updates_list(relief.id)
     }
 
     # retrieve monetary progress
@@ -179,33 +327,43 @@ class ReliefAddressDTO(BaseModel):
     zipcode:int
     coordinates:str
 
+# inkind requirement: name, count
+# volunteer reuqirement: name, count
+
+class InkindRequirementDTO(BaseModel):
+    name:str = Form()
+    count:int = Form()
+
+class VolunteerRequirementDTO(BaseModel):
+    name:str
+    count:int    
+
 class CreateReliefEffortDTO(BaseModel):
     # basic info
     name: str # title
     description: str
     disaster_type: str
     # address
-    address:ReliefAddressDTO
+    address : ReliefAddressDTO
     # dates
-    start_date: date
-    deployment_date: date
-    end_date: date
+    start_date: str
+    deployment_date: str
+    end_date: str
     # monetary goal & account details
     monetary_goal: float
     accountno: str
     platform: str
-    inkind_requirements: list
-    volunteer_requirements: list # object list {type, slots, duration}
-    sponsor_message: str = None
+
+    inkind_requirements: List[InkindRequirementDTO] = None
+    volunteer_requirements: List[VolunteerRequirementDTO] = None
+    sponsor_message: str  = None
 
 @router.post("/as-user")
-async def create_relief_effort_as_individual(res: Response, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+async def create_relief_effort_as_individual(res: Response, body: CreateReliefEffortDTO, user: AuthDetails = Depends(get_current_user)):
     """
     Creates relief effort as a user.
     """
     authorize(user, 2, 4)
-    
-    body:CreateReliefEffortDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
     
     # validate input
     body.start_date = date.fromisoformat(body.start_date)
@@ -220,9 +378,9 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
         }
     
     # check if all images are valid
-    for image in images:
-        if is_image_valid(image) == False:
-            return {"detail" : "One of uploaded files are invalid."}
+    # for image in images:
+    #     if is_image_valid(image) == False:
+    #         return {"detail" : "One of uploaded files are invalid."}
         
     # save basic info
     relief:ReliefEffort = ReliefEffort()
@@ -245,11 +403,11 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
     # save images
 
     # upload pictures to their own folder
-    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/main')
+    # resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/main')
 
-    if resu[1] == False:
-        # do not terminate outright
-        print(f'Images for relief id {relief.id} not uploaded.')
+    # if resu[1] == False:
+    #     # do not terminate outright
+    #     print(f'Images for relief id {relief.id} not uploaded.')
     
     # save address
     address = Address()
@@ -275,9 +433,10 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
         inkind_requirement.count = i_r.count
         inkind_requirement.relief_id = relief.id
         inkind_requirement_list.append(inkind_requirement)
-    if inkind_requirement_list.count() > 0:
+    if len(inkind_requirement_list) > 0:
         db.add_all(inkind_requirement_list)
-
+    
+    # volunteer requirement
     # save volunteer requirements
 
     volunter_requirement_list = []
@@ -288,31 +447,32 @@ async def create_relief_effort_as_individual(res: Response, body: Json = Form(),
         volunteer_requirement.count = v_r.count
         volunteer_requirement.relief_id = relief.id
         volunter_requirement_list.append(volunteer_requirement)
-    
-    if volunter_requirement_list.count() > 0:
+
+    if len(volunter_requirement_list) > 0:
         db.add_all(volunter_requirement_list)
 
     db.commit()
 
-    return {"detail": "Relief effort successfully created"}
+    return {
+            "detail": "Relief effort successfully created",
+            "data" : {
+                "relief_id" : relief.id
+            }}
 
-@router.post("/as-organization/{id}")
-async def create_relief_effort_as_organization(res: Response, id: int, body: Json = Form(), images:List[UploadFile] = File(...) ,user: AuthDetails = Depends(get_current_user)):
+@router.post("/as-organization/{organization_id}")
+async def create_relief_effort_as_organization(res: Response, organization_id: int, body: CreateReliefEffortDTO, user: AuthDetails = Depends(get_current_user)):
     """
     Create relief effort as an organization.
     """
 
     authorize(user, 2, 4)
-
-    # parse JSON Body from multipart form
-    body:CreateReliefEffortDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
     
     # validate date input
     body.start_date = date.fromisoformat(body.start_date)
     body.deployment_date = date.fromisoformat(body.deployment_date)
     body.end_date = date.fromisoformat(body.end_date)
 
-    org: Organization = db.query(Organization).filter(and_(Organization.id == id, Organization.is_deleted == False, Organization.is_active == True)).first()
+    org: Organization = db.query(Organization).filter(and_(Organization.id == organization_id, Organization.is_deleted == False, Organization.is_active == True)).first()
 
     # if org is not found, return HTTP 404
     if org is None:
@@ -331,12 +491,8 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Jso
             "detail" : "Invalid date input."
         }
     
-    for image in images:
-        if is_image_valid(image) == False:
-            return {"detail" : "One of uploaded files are invalid."}
-    
     relief:ReliefEffort = ReliefEffort()
-    relief.owner_id = id
+    relief.owner_id = organization_id
     relief.owner_type = 'ORGANIZATION'
     relief.name = body.name
     relief.description = body.description
@@ -351,13 +507,6 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Jso
 
     db.add(relief)
     db.commit()
-
-    # upload images files
-    resu = await file_handler.upload_multiple_file(images, relief.id, f'relief-efforts/main')
-
-    if resu[1] == False:
-        # do not terminate outright
-        print(f'Images for relief id {relief.id} not uploaded.')
     
     # save address
     address = Address()
@@ -410,7 +559,40 @@ async def create_relief_effort_as_organization(res: Response, id: int, body: Jso
     db.add(relief)
     db.commit()
 
-    return {"detail": "Relief effort successfully created"}
+    return {"detail": "Relief effort successfully created", 
+            "data" : {
+                "organization_id" : organization_id
+            }}
+
+@router.post("/{relief_id}/images")
+async def upload_relief_images(relief_id:int, res:Response, images:List[UploadFile] = File(...), user:AuthDetails = Depends(get_current_user)):
+    # check if images are valid
+    for image in images:
+        if is_image_valid(image) == False:
+            res.status_code = 404
+            return {'detail' : 'Invalid image type in one or more images uploaded.'}
+    
+    relief_effort:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == relief_id, ReliefEffort.is_deleted == False)).first()
+
+    # check if relief effort exists
+    if relief_effort is None:
+        res.status_code = 404
+        return {'detail' : 'Relief effort not found.'}
+    
+    # check if user can act on behalf of relief effort
+    if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user) == False:
+        res.status_code = 403
+        return {'detail': 'Not authorized to affect on behalf of relief effort.'}
+
+    # upload images
+    resu = await file_handler.upload_multiple_file(images, relief_id, 'relief-efforts/main')
+
+    # check if upload was successful
+    if resu[1] == False:
+        res.status_code = 500
+        return {'detail' : 'Unable to upload images.'}
+    
+    return {'detail' : 'Images uploaded.'}
 
 @router.patch("/{id}/approve")
 async def approveReliefEffort(id:int, res: Response, user: AuthDetails = Depends(get_current_user)):
@@ -613,7 +795,7 @@ def get_comments(id:int, res:Response):
     """
     Retrieves comments of a relief effort
     """
-    comments = db.query(ReliefComment).filter(ReliefComment.id == id).all()
+    comments = db.query(ReliefComment).filter(ReliefEffort.id == id).all()
     return comments
 
 class ReliefCommentDTO(BaseModel):
@@ -721,19 +903,15 @@ class CreateUpdateDTO(BaseModel):
     type: str = None
 
 @router.post("/{id}/updates")
-async def create_update(id:int, res:Response, body: Json = Form(), images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
+async def create_update(id:int, res:Response, body: CreateUpdateDTO, user: AuthDetails = Depends(get_current_user)):
     """
     Create update for relief `id`
     """
 
-    # check user authorization
     authorize(user, 2, 4)
     
-    # parse JSON request from multipart form
-    body:CreateUpdateDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
-    
     # check if relief exists
-    relief:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == id, ReliefEffort.is_active == True)).first()
+    relief:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == id, ReliefEffort.is_active == False)).first()
 
     # checks if relief exists
     if relief is None:
@@ -769,12 +947,6 @@ async def create_update(id:int, res:Response, body: Json = Form(), images:List[U
             res.status_code = 400
             return {"detail" : "Invalid owner type"}
     
-    # validate images
-    for image in images:
-        if is_image_valid(image) == False:
-            res.status_code = 400
-            return {"detail" : "One of uploaded files are invalid."}
-    
     # instantiate relief effort
     update: ReliefUpdate = ReliefUpdate()
 
@@ -786,10 +958,49 @@ async def create_update(id:int, res:Response, body: Json = Form(), images:List[U
     db.add(update)
     db.commit()
 
-    # add images
-    await file_handler.upload_multiple_file(images, id, f'relief-efforts/{id}/updates/{update.id}')
+    return {"detail": "Successfully created update.",
+            "data" : {
+                "relief_id" : relief.id,
+                "update_id" : update.id
+            }}
 
-    return {"detail": "Successfully created update."}
+@router.post('/{relief_id}/updates/{update_id}')
+async def upload_update_images(update_id:int, relief_id:int, res:Response, images:List[UploadFile] = File(...), user: AuthDetails = Depends(get_current_user)):
+    authorize(user, 2, 4)
+
+    # check if images are valid
+    for image in images:
+        if is_image_valid(image) == False:
+            res.status_code = 400
+            return {'detail' : 'One or more of the images uploaded have invalid file formats.'}
+    
+    relief_effort:ReliefEffort = db.query(ReliefEffort).filter(and_(ReliefEffort.id == relief_id, ReliefEffort.is_deleted == False)).first()
+
+    # check if relief exists    
+    if relief_effort is None:
+        res.status_code = 404
+        return {'detail' : 'Relief effort non-existent'}
+    
+    relief_update = db.query(ReliefUpdate).filter(and_(ReliefUpdate.id == update_id, ReliefUpdate.is_deleted == False)).first()
+
+    # check if update exists
+    if relief_update is None:
+        res.status_code = 404
+        return {'detail': 'Relief update non-existing'}
+
+    # check if user is authorized to act on behalf
+    if is_authorized(relief_effort.owner_id, relief_effort.owner_type, user) == False:
+        res.status_code = 403
+        return {'detail' : 'Unable to act on behalf of relief effort.'}
+    
+    # add images
+    resu = await file_handler.upload_multiple_file(images, update_id, 'relief-efforts/updates')
+
+    if resu[1] == False:
+        res.status_code = 500
+        return {'detail' : 'Unable to upload images'}
+    
+    return {'detail': 'Successfully uploaded images to relief update.'} 
 
 class ReliefUpdateStatusDTO(BaseModel):
     owner_type: str

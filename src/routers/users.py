@@ -39,6 +39,31 @@ class NewAddressDTO(BaseModel):
     zipcode: int
     coordinates: str
 
+class DetailResponse(BaseModel):
+    detail:str
+    
+class RetrieveUserResponse(BaseModel):
+    user_id: int
+    # sponsor_user_id : int
+    # firstname : str
+    # lastname : str
+    # level : int
+    # is_verified : bool
+    # profile : str
+    
+
+    def __init__(self, user:User, profile_link:str):
+        super(BaseModel, self).__init__()
+        self.user_id = user.id
+        self.sponsor_id = user.sponsor_id
+        self.firstname = user.first_name
+        self.lastname = user.last_name
+        self.level = user.level
+        self.is_verified = user.is_verified
+        self.profile = profile_link
+
+
+
 @router.get("/")
 async def retrieve_users(p: int = 1, c: int = 10):
     """
@@ -50,7 +75,7 @@ async def retrieve_users(p: int = 1, c: int = 10):
     
     # initialize array of users
     to_return = []
-    
+
     # iterate and only select necessary data from each user
     for user in users:
         profile_link = await file_handler.get_user_profile(user.id)
@@ -71,7 +96,7 @@ async def retrieve_user(id:int):
     """
     Retrieves a particular user, identified by `id`.
     """
-
+    print(id)
     # finds user
     user:User = db.query(User).filter(and_(User.id == id, User.is_deleted == False)).first()
 
@@ -96,6 +121,7 @@ async def retrieve_user(id:int):
         "is_verified" : user.is_verified,
         "profile" : profile_link
     }
+
 
 @router.get("/is-username-taken")
 async def check_if_username_is_taken(username:str, res:Response):
@@ -134,9 +160,6 @@ async def basic_signup(res: Response, body:BasicUserDTO):
     Creates level 1 user.
     Requires `fname`, `lname`, `username`, `password`, `confirmPassword`, `email`, `mobile`.
     """
-
-    # parses body from JSON input in multipart form
-    # body:BasicUserDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
 
     # check if email is already used  
     if db.query(User).filter(User.email == body.email).first() != None:
@@ -247,15 +270,13 @@ class UpgradeAccountDTO(BaseModel):
     coordinates: str
 
 @router.post("/upgrades")
-async def upgrade_personal_account(res: Response, valid_id: UploadFile, body:Json = Form(), user: AuthDetails = Depends(get_current_user)):
+async def upgrade_personal_account(res: Response, valid_id: UploadFile, body:UpgradeAccountDTO = Form(), user: AuthDetails = Depends(get_current_user)):
     """
     Upgrades user to account level 2
     """
 
     # check for authorization
     authorize(user, 1, 1) # only accounts of level 1 can upgrade to personal+
-
-    body:UpgradeAccountDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
 
     # check if image upload is valid
     if is_image_valid(valid_id) == False:

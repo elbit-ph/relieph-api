@@ -1,5 +1,5 @@
 from typing import Annotated, List
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, status, Response
+from fastapi import APIRouter, Depends, Form, UploadFile, HTTPException, status, Response
 from dependencies import get_current_user
 from services.db.database import Session
 from services.db.models import Organization, User, Address, SponsorshipRequest
@@ -12,6 +12,7 @@ from datetime import datetime
 from sqlalchemy import and_
 import json
 from types import SimpleNamespace
+from dataclasses import dataclass
 
 router = APIRouter(
     prefix="/organizations",
@@ -33,7 +34,7 @@ class OrganizationAddressDTO(BaseModel):
     city:str
     brgy:str
     street:str
-    zipcode:str
+    zipcode:int
     coordinates:str
 
 @router.get("/")
@@ -95,21 +96,23 @@ async def retrieve_organization(organization_id: int, res: Response):
     }
 
 class CreateOrganizationDTO(BaseModel):
-    name:str
-    description:str
-    address: OrganizationAddressDTO
+    name:str = Form()
+    description:str = Form()
+    region:str = Form()
+    city:str = Form()
+    brgy:str = Form()
+    street:str = Form()
+    zipcode:int = Form()
+    coordinates:str = Form()
 
 @router.post("/")
-async def create_organization(res:Response, profile: UploadFile, user: AuthDetails = Depends(get_current_user)):
+async def create_organization(res:Response, body:CreateOrganizationDTO, user: AuthDetails = Depends(get_current_user)):
     """
     Creates a new organization, uploads its profile picture, and sends a notification email.
     """
 
     # check for authorization
-    authorize(user,2,4)
-
-    # parses body data from request body
-    body:CreateOrganizationDTO = json.loads(json.dumps(body), object_hook=lambda d: SimpleNamespace(**d))
+    authorize(user,2,4)    
 
     # check if name already exists
     org:Organization = db.query(Organization).filter(Organization.name == body.name).first()
@@ -136,22 +139,15 @@ async def create_organization(res:Response, profile: UploadFile, user: AuthDetai
     
     newAddress.owner_id = org.id
     newAddress.owner_type = "ORGANIZATION"
-    newAddress.region = body.address.region
-    newAddress.city = body.address.city
-    newAddress.brgy = body.address.brgy
-    newAddress.street = body.address.street
-    newAddress.zipcode = body.address.zipcode
-    newAddress.coordinates = body.address.coordinates
+    newAddress.region = body.region
+    newAddress.city = body.city
+    newAddress.brgy = body.brgy
+    newAddress.street = body.street
+    newAddress.zipcode = body.zipcode
+    newAddress.coordinates = body.coordinates
 
     db.add(newAddress)
     db.commit()
-
-    # upload organization profile
-    resu = await file_handler.upload_file(profile, org.id, 'organizations')
-
-    # notify in case profile is not added correctly
-    if resu[1] == False:
-        print(f'Profile of organization {id} not added correctly.')
 
     # get user info (for email)
     user:User = db.query(User).filter(User.id == user.user_id).first()
@@ -159,7 +155,9 @@ async def create_organization(res:Response, profile: UploadFile, user: AuthDetai
     # email user that an organization was creatd.
     await org_emailer.send_organization_creation_notice(user.email, user.first_name, org.name)
 
-    return {"details": "Organization created."}
+    return {"details": "Organization created.", "data": {
+        "organization_id" : org.id
+    }}
 
 @router.patch("/{id}/address")
 def edit_organization_address(id:int, body:OrganizationAddressDTO, res:Response, user: AuthDetails = Depends(get_current_user)):
@@ -181,17 +179,17 @@ def edit_organization_address(id:int, body:OrganizationAddressDTO, res:Response,
     # check if org owner is user
     if org.owner_id != user.user_id:
         res.status_code = 403
-        return {"detail": "Forbidden access"}
+        return {"detail": "Not authorized to act on behalf of organization."}
 
     # retrieve address
     address:Address = db.query(Address).filter(Address.owner_type == 'ORGANIZATION' and Address.owner_id == id).first()
     
-    address.region = address.region if body.region is "" else body.region
-    address.city = address.city if body.city is "" else body.city
-    address.brgy = address.brgy if body.brgy is "" else body.brgy
-    address.street = address.street if body.street is "" else body.street
-    address.zipcode = address.zipcode if body.zipcode is "" else body.zipcode
-    address.coordinates = address.coordinates if body.coordinates is "" else body.coordinates
+    address.region = address.region if body.region == "" else body.region
+    address.city = address.city if body.city == "" else body.city
+    address.brgy = address.brgy if body.brgy == "" else body.brgy
+    address.street = address.street if body.street == "" else body.street
+    address.zipcode = address.zipcode if body.zipcode == "" else body.zipcode
+    address.coordinates = address.coordinates if body.coordinates == "" else body.coordinates
     address.updated_at = datetime.now()
 
     db.commit()

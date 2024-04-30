@@ -62,6 +62,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     return {
         "access_token": create_access_token(user.username, user.level),
         "refresh_token": create_refresh_token(user.username, user.level),
+        "user_id" : user.id
     }
 
 @router.post("/forgot-password")
@@ -149,6 +150,7 @@ async def reset_password(body:PasswordResetModel, response:Response):
 
 GOOGLE_CLIENT_ID =  os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")
 
 @router.get("/login/google")
 async def login_google():

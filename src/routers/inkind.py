@@ -169,6 +169,8 @@ async def create_instant_donation(inkind_requirement_id:int, body:PledgeDTO, res
     donation.status = 'DELIVERED'
     donation.expiry = body.expiry_date
 
+    inkind_requirement.count += 1
+
     db.add(donation)
     db.commit()
 
@@ -201,6 +203,10 @@ async def mark_donation_as_delivered(res: Response, donation_id:int, user: AuthD
     
     inkind.status = "DELIVERED"
     inkind.updated_at = datetime.now()
+
+    inkind_requirement:InkindDonationRequirement = db.query(InkindDonationRequirement).filter(InkindDonationRequirement.id == inkind.inkind_requirement_id).first()
+
+    inkind_requirement.count += 1
 
     db.commit()
 

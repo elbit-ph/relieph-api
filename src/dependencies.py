@@ -45,7 +45,7 @@ def get_file_handler():
     return FileHandler()
 
 reuseable_oauth = OAuth2PasswordBearer(
-        tokenUrl="/login",
+        tokenUrl="auth/login",
         scheme_name="JWT"
     )
 
